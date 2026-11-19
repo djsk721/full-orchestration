@@ -16,5 +16,16 @@
     "package:windows": "npm run package:windows --workspace @orchestration/desktop",
     "inspect": "npm run inspect --workspace @orchestration/desktop --",
     "verify": "node scripts/qa/verify.mjs"
+  },
+  "devDependencies": {
+    "electron-builder": "26.18.0"
+  },
+  "overrides": {
+    "app-builder-lib@26.18.0": {
+      "minimatch@^10.2.5": "11.0.9",
+      "@electron/universal@2.0.3": {
+        "minimatch@^9.0.3": "11.0.9"
+      }
+    }
   }
 }
