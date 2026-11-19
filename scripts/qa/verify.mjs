@@ -5,9 +5,9 @@ import { desktopPackage, withDisplay } from "./platform.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const args = new Set(process.argv.slice(2));
-if ([...args].some((arg) => !["--core-only", "--ui", "--ssh", "--package", "--harness"].includes(arg)) ||
-    (args.has("--core-only") && args.size > 1)) {
-  console.error("Usage: npm run verify -- [--core-only | [--ui] [--package] [--ssh] [--harness]]");
+if ([...args].some((arg) => !["--core-only", "--package-only", "--ui", "--ssh", "--package", "--harness"].includes(arg)) ||
+    ((args.has("--core-only") || args.has("--package-only")) && args.size > 1)) {
+  console.error("Usage: npm run verify -- [--core-only | --package-only | [--ui] [--package] [--ssh] [--harness]]");
   process.exit(2);
 }
 const npmCli = process.env.npm_execpath;
@@ -37,8 +37,10 @@ if (args.has("--core-only")) {
     process.execPath, ["--test", "apps/desktop/build/main/tests/domain.test.js"]);
   process.exit(0);
 }
-npm("TypeScript contracts, Python parity and adapter tests", ["test"]);
-run("Python regression and native adapter contracts", python, ["-m", "unittest", "discover", "-s", "tests", "-v"]);
+if (!args.has("--package-only")) {
+  npm("TypeScript contracts, Python parity and adapter tests", ["test"]);
+  run("Python regression and native adapter contracts", python, ["-m", "unittest", "discover", "-s", "tests", "-v"]);
+}
 if (args.has("--ui")) {
   npm("Electron UI from source", ["run", "test:e2e"], { display: true });
   const koreanTk = { display: true, extra: { ORCHESTRA_LANG: "ko" } };
@@ -62,7 +64,7 @@ if (args.has("--harness")) {
   run("Optional installed Harness startup and authentication inventory", python, ["scripts/qa/harness_inventory.py"]);
   run("Installed OpenCode with a scripted loopback API", python, ["tests/smoke_installed_opencode.py"]);
 }
-if (args.has("--package")) {
+if (args.has("--package") || args.has("--package-only")) {
   const packaging = desktopPackage(root);
   npm("Native Electron packaging", ["run", packaging.script]);
   npm("Packaged Electron UI", ["run", "test:e2e"], {

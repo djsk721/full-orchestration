@@ -31,6 +31,12 @@ function Install-Preview {
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
         throw 'Installed Electron executable was not found.'
     }
+    $runtime = Join-Path (Split-Path $workspace) '_internal'
+    if (-not (Test-Path -LiteralPath $workspace -PathType Leaf) -or
+        -not (Get-ChildItem -LiteralPath $runtime -Filter 'python3*.dll' -ErrorAction SilentlyContinue |
+            Where-Object Name -Match '^python3[0-9]+\.dll$')) {
+        throw 'The installed Tk workspace or bundled Python runtime was not found.'
+    }
 }
 
 function Remove-Preview {
@@ -39,6 +45,7 @@ function Remove-Preview {
     $cleanup = Start-Process -FilePath $uninstaller[0].FullName -ArgumentList '/S' -PassThru -Wait
     if ($cleanup.ExitCode -ne 0) { throw "NSIS uninstall failed ($($cleanup.ExitCode))." }
     if (Test-Path -LiteralPath $binary -PathType Leaf) { throw 'Installed executable remains after uninstall.' }
+    if (Test-Path -LiteralPath $workspace -PathType Leaf) { throw 'Installed workspace remains after uninstall.' }
 }
 
 function Assert-DataRetained {
@@ -51,6 +58,7 @@ function Assert-DataRetained {
 }
 
 $binary = Join-Path $target 'model-orchestration-preview.exe'
+$workspace = Join-Path $target 'resources\workspace\ModelOrchestration.exe'
 Push-Location $root
 try {
     New-Item -ItemType Directory -Path $data -ErrorAction Stop | Out-Null
@@ -68,12 +76,14 @@ try {
     foreach ($stage in @('fresh install', 'reinstall')) {
         Write-Host "Verifying $stage"
         Install-Preview
+        & $python 'tests/smoke_packaged_windows_workspace.py' $workspace --open-terminal
+        if ($LASTEXITCODE -ne 0) { throw "Installed Tk workspace verification failed after $stage." }
         npm.cmd run test:e2e
         if ($LASTEXITCODE -ne 0) { throw "Installed Electron verification failed after $stage." }
         Assert-DataRetained
         Remove-Preview
         Assert-DataRetained
-        Write-Host "PASS: $stage, Electron startup and shutdown, uninstall and unchanged SQLite/configuration hashes"
+        Write-Host "PASS: $stage, Tk and Electron startup and shutdown, uninstall and unchanged SQLite/configuration hashes"
     }
 } finally {
     $env:ORCHESTRA_PREVIEW_EXECUTABLE = $originalExecutable

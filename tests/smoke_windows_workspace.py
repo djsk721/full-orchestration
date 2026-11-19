@@ -22,7 +22,17 @@ from orchestra.platform.desktop import prepare_dpi
 from orchestra.platform.terminal_windows import NativePty
 
 
-CONSOLE_FIXTURE = """import os, subprocess, sys
+CONSOLE_FIXTURE = """import ctypes, os, subprocess, sys
+from ctypes import wintypes
+kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel.GetStdHandle.argtypes = [wintypes.DWORD]
+kernel.GetStdHandle.restype = wintypes.HANDLE
+kernel.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+kernel.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+stdout = kernel.GetStdHandle(-11)
+mode = wintypes.DWORD()
+if not kernel.GetConsoleMode(stdout, ctypes.byref(mode)) or not kernel.SetConsoleMode(stdout, mode.value | 0x0004):
+    raise ctypes.WinError(ctypes.get_last_error())
 sys.stdin.reconfigure(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(90)"])

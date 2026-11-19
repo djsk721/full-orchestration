@@ -29,7 +29,6 @@ try {
         npm.cmd run verify -- --ui --package
         if ($LASTEXITCODE -ne 0) { throw 'Shared Windows regression or packaging failed.' }
         & (Join-Path $PSScriptRoot 'verify-windows-installer.ps1')
-        & (Join-Path $root 'Build-Windows.ps1') -Python $python -InstallBuildDependency -VerifyWorkspace
     }
 } finally {
     $env:ORCHESTRA_LANG = $observed.ORCHESTRA_LANG

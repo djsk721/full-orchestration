@@ -17,6 +17,12 @@
   "win": {
     "target": [
       "nsis"
+    ],
+    "extraResources": [
+      {
+        "from": "../../dist/ModelOrchestration",
+        "to": "workspace"
+      }
     ]
   },
   "executableName": "model-orchestration-preview"

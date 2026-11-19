@@ -32,6 +32,10 @@ def native_windows():
     user32.IsWindowVisible.argtypes = [wintypes.HWND]
     user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
     user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, wintypes.WPARAM]
+    user32.keybd_event.restype = None
 
     def find(pid, *, excluding=None):
         matches = []
@@ -54,7 +58,18 @@ def native_windows():
         if not user32.PostMessageW(hwnd, 0x0010, 0, 0):  # WM_CLOSE
             raise ctypes.WinError(ctypes.get_last_error())
 
-    return find, close
+    def open_terminal(hwnd):
+        user32.SetForegroundWindow(hwnd)
+        wait_for(lambda: user32.GetForegroundWindow() == hwnd, "the packaged workspace did not receive focus", timeout=5)
+        control, letter_t, key_up = 0x11, 0x54, 0x02
+        user32.keybd_event(control, 0, 0, 0)
+        try:
+            user32.keybd_event(letter_t, 0, 0, 0)
+            user32.keybd_event(letter_t, 0, key_up, 0)
+        finally:
+            user32.keybd_event(control, 0, key_up, 0)
+
+    return find, close, open_terminal
 
 
 def supervisor_for(profile, owner, *, previous=None):
@@ -70,8 +85,18 @@ def supervisor_for(profile, owner, *, previous=None):
         return None
 
 
-def exercise(binary, profile):
-    find_window, close_window = native_windows()
+def local_shell(owner):
+    for process in owner.children(recursive=True):
+        try:
+            if process.name().casefold() == "powershell.exe" and "-NoLogo" in process.cmdline():
+                return process
+        except psutil.NoSuchProcess:
+            continue
+    return None
+
+
+def exercise(binary, profile, *, open_terminal):
+    find_window, close_window, open_local_terminal = native_windows()
     env = os.environ | {"ORCHESTRA_DATA": str(profile)}
     env.pop("ORCHESTRA_LANG", None)
     app = subprocess.Popen([str(binary)], env=env)
@@ -88,6 +113,11 @@ def exercise(binary, profile):
         owned.append(first)
         status = profile / "supervisor.json"
         print(f"Tk first-run and packaged Supervisor startup PASS (PID {first.pid})", flush=True)
+        if open_terminal:
+            open_local_terminal(window)
+            terminal = wait_for(lambda: local_shell(owner), "the packaged Tk workspace did not start its local shell")
+            owned.append(terminal)
+            print(f"Packaged local terminal startup PASS (PowerShell PID {terminal.pid})", flush=True)
 
         # Kill only the child located through the isolated profile and verified above.
         first.kill()
@@ -99,10 +129,15 @@ def exercise(binary, profile):
 
         close_window(window)
         assert app.wait(timeout=12) == 0, "frozen workspace did not exit cleanly"
+        if open_terminal:
+            terminal.wait(timeout=8)
         (profile / "supervisor.stop").touch()
         second.wait(timeout=12)
         assert not status.exists(), "Supervisor status remained after graceful shutdown"
-        assert json.loads((profile / "ui-workspace.json").read_text(encoding="utf-8"))["version"] == 1
+        layout = json.loads((profile / "ui-workspace.json").read_text(encoding="utf-8"))
+        assert layout["version"] == 1
+        if open_terminal:
+            assert layout["terminals"], "the packaged workspace did not persist the local terminal layout"
         with closing(sqlite3.connect((profile / "state.db").as_uri() + "?mode=ro", uri=True)) as connection:
             assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     finally:
@@ -124,13 +159,14 @@ def exercise(binary, profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
+    parser.add_argument("--open-terminal", action="store_true")
     args = parser.parse_args()
     if sys.platform != "win32":
         print("NOT VERIFIED: packaged Tk startup requires native Windows.", file=sys.stderr)
         return 2
     binary = args.binary.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="orchestra-frozen-windows-") as directory:
-        exercise(binary, Path(directory) / "한글 프로필")
+        exercise(binary, Path(directory) / "한글 프로필", open_terminal=args.open_terminal)
     print("PASS: frozen Tk first-run language, Supervisor restart, shutdown, layout and SQLite integrity")
     return 0
 
