@@ -1,28 +1,20 @@
 # Workspace production readiness
 
-**Overall PARTIAL.** Linux regressions and release package execution passed. The original 8,000-line workload returned to approximately 1.6 seconds. Native Windows ConPTY, Job Objects, installation, IME and display scaling remain **NOT VERIFIED**.
+**Overall PARTIAL.** The feature branch is published and both Linux and Windows automated release checks passed in GitHub Actions. The [release decision](orca-workspace-release-candidate.md) tracks the manual desktop gates.
 
 | Release gate | Status | Candidate evidence |
 | --- | --- | --- |
-| Full Linux regression | PASS | 53 Python, 25 TypeScript, six Tk and 15 Electron checks. Two Windows-only Python cases skipped on Linux. |
-| Linux release packaging | PASS | Native x64 unpacked build and AppImage generated locally. Five Playwright checks each passed from source, the unpacked build and AppImage extract-and-run. |
-| Original 8,000-line Linux burst | PASS | 1.58–1.70 s across three runs. Three matched pre-change runs took 2.37–2.63 s. |
-| Linux Tk tail latency | PARTIAL | 79–93 ms maximum across the three optimized soak rounds. Multi-session benchmark maxima exceeded 90 ms in some runs. |
-| Simultaneous output, input isolation and process cleanup | PASS | One, two and four active terminals, both splits, repeated project/tab selection, isolated input during peer output, and 360 PTYs reaped by the candidate soak. |
-| Supervisor, SQLite, Provider, MCP, Agent, DAG, QA, Git | PASS | Actual Supervisor, process, SQLite and Git execution with controlled API responses or tool fixtures. |
-| SSH shell, Worker and remote Git | PASS | Actual pinned loopback OpenSSH with disposable Linux Worker and repos. The current client read earlier and current Worker data. The TypeScript client read the same run and cursor as Python. |
-| Installed interactive CLIs and OpenCode Harness | PASS | Real binaries with isolated profiles. CLI terminal sessions started offline. The OpenCode job used a scripted loopback API for tool reads, cancellation and error propagation. |
-| Windows native CI, standalone Tk and NSIS lifecycle | NOT VERIFIED | Windows workflow definition and isolated test procedures prepared. Native job and manual acceptance await a Windows host. |
-| All-day terminal memory and production deployment | PARTIAL | Repeated workload and recovery passed. Longer operating sessions remain unmeasured. |
-| GPU and authenticated inference | NOT APPLICABLE | Excluded from this phase. |
+| Linux regression | PASS | 53 Python, 25 TypeScript, six Tk and 15 Electron checks. Two Windows-only Python cases skipped. |
+| Linux packaging | PASS | Native x64 unpacked build and AppImage. Five Electron tests each from source, unpacked output and AppImage extract-and-run. |
+| Linux 8,000-line throughput | PASS | The comparable soak median was 1.704 s, versus 2.535 s before optimization. |
+| Linux input integrity, resource stability and tail latency | PARTIAL | Zero missing or duplicated numbered rows. Every candidate soak reaped 360 PTYs. The soak maxima were 77–80 ms, and the multi-session benchmark documented higher tail delays. |
+| Supervisor, SQLite, Provider, MCP, Agent, DAG, QA and Git | PASS | Local and hosted process, store and Git execution with controlled local API and tool fixtures. |
+| SSH shell, Worker and remote Git | PASS | Actual pinned loopback OpenSSH with a disposable Linux Worker and repos. Earlier and current Worker formats and both clients were rechecked. |
+| Linux installed offline CLIs | PASS | Both installed binaries start in disposable offline terminals, with focus, resize, clipboard and cleanup. |
+| Windows installation, reinstallation and persistence | PASS | Native x64 NSIS build. Installed Tk, PowerShell, Supervisor replacement and installed Electron passed twice, with unchanged SQLite and configuration hashes through both removals. |
+| Windows manual desktop release | NOT VERIFIED | Korean IME, 100%, 125%, 150% display scales and manual GUI acceptance remain open. |
+| All-day terminal memory and production deployment | PARTIAL | Repeated workloads and recovery passed. Longer operating sessions remain unmeasured. |
+| Authenticated inference | NOT VERIFIED | Outside this task's validation. |
+| GPU and macOS | NOT APPLICABLE | Excluded. |
 
-The 98-pass baseline was 52 Python, 25 TypeScript, six Tk and 15 Electron. This run adds one Python regression for cached pyte handlers. The integrated Tk scenario also checks real keyboard delivery to one pane while another writes sustained output. No Linux regression failed. The two skipped cases require real Windows directory junctions and the read-only file attribute.
-
-```bash
-npm run verify -- --ui --package
-npm run verify -- --core-only
-python tests/smoke_workspace_ssh.py --typescript --legacy-ref e76e876
-ORCHESTRA_LANG=ko xvfb-run -a python tests/smoke_integrated_workspace.py --ssh
-```
-
-The [platform matrix](platform-compatibility.md) shows execution coverage. See [terminal performance and multi-session QA](terminal-performance-qa.md), [Windows CI and packaging readiness](windows-ci-readiness.md) and [Windows native acceptance](windows-native-ux-validation.md) for the matching release evidence.
+The [platform matrix](platform-compatibility.md) shows execution coverage. See [terminal performance](terminal-performance-qa.md), [CI execution](windows-ci-execution-report.md), [Windows packaging](windows-ci-readiness.md) and [manual Windows acceptance](windows-native-ux-validation.md).

@@ -1,6 +1,6 @@
 # Terminal performance and multi-session QA
 
-Linux PTY throughput, output integrity and lifecycle checks are **PASS**. Tail latency under multiple busy panes is **PARTIAL** against a 90 ms target. Windows performance is **NOT VERIFIED**.
+Linux PTY throughput, output integrity and lifecycle checks are **PASS**. Tail latency under multiple busy panes is **PARTIAL** against a 90 ms target. Native Windows results cover single-terminal and two-pane workloads on a GitHub-hosted Windows runner.
 
 ## Measurements
 
@@ -60,3 +60,20 @@ npm run verify -- --ui --package
 ```
 
 The benchmark writes one JSON record per scenario and round. Each includes elapsed time, delay percentiles, process CPU, sampled RSS, read sizes and waits, queue peaks, parse and draw timings, and output integrity.
+
+## Published candidate repeat
+
+On the Linux host, the same three-round dataset and output integrity assertions produced the following measurements. CPU and elapsed time are medians. Maximum delay and peak RSS are the highest observed across the three runs.
+
+| Workload | Elapsed | Tk median / P95 / P99 / max | Desktop CPU | Peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| Single terminal | 0.802 s | 5.7 / 18.0 / 65.2 / 119.7 ms | 0.60 s | 80.0 MiB |
+| Two, horizontal | 0.805 s | 12.4 / 38.0 / 89.2 / 120.9 ms | 0.71 s | 82.4 MiB |
+| Two, vertical | 0.868 s | 13.4 / 42.5 / 77.6 / 126.6 ms | 0.76 s | 82.8 MiB |
+| Four, two projects | 1.684 s | 37.1 / 89.8 / 110.0 / 154.7 ms | 1.60 s | 81.6 MiB |
+
+The queue reached 48 chunks and retained scrollback reached 1,500 rows. Each four-session round switched project and tab eight times. All 27 sessions delivered every expected numbered row once, passed the retained-history checks, and reaped all of their PTY children. Throughput and integrity are **PASS**. Tail latency remains **PARTIAL**.
+
+The separate 360-PTY soak after the Windows startup correction measured 1.566, 1.704 and 1.788 s for its plain-text 8,000-line bursts. The median was 1.704 s, compared with the 1.650 s optimized baseline and 2.535 s before the optimization. Maximum Tk delay in the three rounds was 77–80 ms. Settled desktop RSS peaked at 62.0 MiB and every round finished with zero child processes.
+
+Windows measurements and their separately executed native workload appear in [native Windows test results](windows-native-test-results.md).
