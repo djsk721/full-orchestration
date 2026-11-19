@@ -1,0 +1,30 @@
+{
+  "title": "Worktree 변경 및 독립 검토",
+  "repo": "C:\\repos\\example",
+  "target": "main",
+  "background": false,
+  "tasks": [
+    {
+      "id": "documentation",
+      "role": "developer",
+      "model": "local-model",
+      "harness": "managed",
+      "prompt": "Inspect the repository and write a short description of its entry point in overview.md.",
+      "acceptance": "overview.md identifies the application entry point and contains setup steps.",
+      "paths": ["overview.md"],
+      "depends": []
+    },
+    {
+      "id": "review",
+      "role": "reviewer",
+      "model": "local-model",
+      "harness": "managed",
+      "prompt": "Review overview.md against the repository and acceptance criteria.",
+      "acceptance": "The entry point is accurate and setup instructions can be followed.",
+      "depends": ["documentation"]
+    }
+  ],
+  "qa": [
+    ["python.exe", "-c", "from pathlib import Path; assert Path('overview.md').stat().st_size > 50"]
+  ]
+}

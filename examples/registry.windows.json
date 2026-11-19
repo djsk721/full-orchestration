@@ -1,0 +1,47 @@
+{
+  "settings": {
+    "background": false,
+    "parallel_jobs": 2,
+    "parallel_tasks": 3,
+    "allow_background_write": false
+  },
+  "providers": {
+    "local": {"kind": "local"},
+    "subscription": {"kind": "attached"}
+  },
+  "runtimes": {
+    "llama-local": {
+      "kind": "llama.cpp",
+      "ownership": "managed",
+      "url": "http://127.0.0.1:8080",
+      "executable": "C:\\llama.cpp\\llama-server.exe",
+      "model_path": "C:\\models\\model.gguf",
+      "context": 8192,
+      "max_output": 2048,
+      "slots": 1,
+      "gpu_layers": 0
+    }
+  },
+  "models": {
+    "local-model": {
+      "provider": "local",
+      "model": "local-model",
+      "runtime": "llama-local",
+      "harnesses": ["managed", "opencode-local"],
+      "roles": ["planner", "developer", "explorer", "reviewer", "qa", "diagnostic"],
+      "quality": 50,
+      "tool_score": 50,
+      "reliability": 50
+    }
+  },
+  "harnesses": {
+    "managed": {"kind": "managed", "max_rounds": 30},
+    "opencode-local": {
+      "kind": "opencode",
+      "executable": "C:\\OpenCode\\opencode.exe",
+      "trusted": false,
+      "allow_write": false
+    }
+  },
+  "mcp": {}
+}
