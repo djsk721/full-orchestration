@@ -5,13 +5,11 @@ import hmac
 import json
 import queue
 import re
-import secrets
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
-from .core import Invalid, digest, encode, ident, require
+from .core import Invalid, digest, encode, require
 from .processes import Child, env_for_process
 from .runtime import http, secret
 
@@ -197,13 +195,15 @@ def virtual_name(server, tool):
     return norm if len(norm) <= 64 else norm[:50] + "_" + digest([server, tool])[:12]
 
 
-def published(profile, spec, catalog, role=None, selected=None, native=False):
+def published(profile, spec, catalog, role=None, selected=None, native=False, *, agent=None):
     visible = {}
     for name, rule in spec.get("tools", {}).items():
         alias = virtual_name(profile, name)
         if name not in catalog or (selected is not None and alias not in selected):
             continue
         if native and (not rule.get("native", False) or rule["access"] != "read"):
+            continue
+        if rule.get("agents") and agent not in rule["agents"]:
             continue
         if role is not None and (role not in rule.get("roles", []) or rule["access"] == "write" and role != "developer"):
             continue

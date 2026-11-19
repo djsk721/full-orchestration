@@ -16,7 +16,7 @@
 
 - Model HTTP Runtime은 loopback입니다. Attached Runtime의 Bearer 값은 `auth_env`가 가리키는 환경 변수에 둡니다. Managed llama.cpp 및 OpenCode 로컬 연결에는 인증 없는 로컬 주소가 필요합니다.
 - 구독형 CLI는 해당 계정의 기존 로그인을 사용합니다. `trusted`, `allow_unverified`, `inherit_environment`, `allow_write`는 신뢰한 CLI와 Workspace에서 필요한 경우에만 켭니다. CLI 권한과 Git 변경 검사는 완전한 OS 격리를 제공하지 않습니다.
-- 앱에는 SSH 호스트, 키, 패스프레이즈, `known_hosts` 또는 원격 Workspace 등록 화면이 없습니다. [Remote Execution 로드맵](../roadmap.md)을 참고하세요.
+- SSH는 앱 관리 공개 호스트 키, 기존 SSH Agent 또는 키 파일 경로를 사용합니다. Worker는 명시적으로 허용된 Linux Git 저장소에서 실행합니다. [워크스페이스 가이드](../user-guide/workspace.md)
 - QA argv는 사용자의 권한으로 실행됩니다. 신뢰하는 작업 정의와 저장소에서만 승인하고, 전용 비특권 계정과 OS의 파일 및 네트워크 접근 제어를 적용하세요.
 
 ## MCP 정책

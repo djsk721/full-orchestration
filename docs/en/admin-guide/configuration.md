@@ -2,7 +2,7 @@
 
 ## Registry
 
-**모델 및 실행 설정** (Model and execution settings) validates UTF-8 JSON and saves it to `registry.json` in the data directory. Omitted top-level sections use defaults. Importing a section replaces its previous contents when saved. Jobs keep the settings snapshot from submission.
+**설정 → 고급 JSON** (Settings → Advanced JSON) validates UTF-8 JSON and saves it to `registry.json` in the data directory. Omitted top-level sections use defaults. Importing a section replaces its previous contents when saved. Jobs keep the settings snapshot from submission.
 
 | Section | Main settings |
 | --- | --- |

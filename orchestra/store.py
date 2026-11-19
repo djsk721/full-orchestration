@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .core import Invalid, digest, encode, require
+from . import desktop_contract
 
 
 class Store:
@@ -40,11 +41,21 @@ class Store:
                     job TEXT NOT NULL, task TEXT NOT NULL, key TEXT NOT NULL, state TEXT NOT NULL,
                     tool TEXT NOT NULL, args TEXT NOT NULL, PRIMARY KEY(job,task,key)
                 );
+                CREATE TABLE IF NOT EXISTS remote_requests (
+                    request_id TEXT PRIMARY KEY, plan_hash TEXT NOT NULL, job TEXT NOT NULL REFERENCES jobs(id)
+                );
+                CREATE TABLE IF NOT EXISTS remote_runs (
+                    id TEXT PRIMARY KEY, host TEXT NOT NULL, plan TEXT NOT NULL, remote_job TEXT, created REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS calls (
                     job TEXT NOT NULL, task TEXT NOT NULL, key TEXT NOT NULL, state TEXT NOT NULL,
                     result TEXT, PRIMARY KEY(job,task,key)
                 );
             """)
+            needs_contract = not desktop_contract.installed(conn)
+        if needs_contract:
+            with self.connect(write=True) as conn:
+                desktop_contract.install(conn)
 
     @contextmanager
     def connect(self, write=False):
@@ -74,14 +85,22 @@ class Store:
         with self.connect(write=True) as conn:
             self.event_tx(conn, job, task, kind, payload, route)
 
-    def submit(self, plan, config, foreground):
+    def submit(self, plan, config, foreground, *, request_id=None):
         key = digest([plan, config])
         now = time.time()
         with self.connect(write=True) as conn:
+            plan_hash = digest(plan)
+            if request_id is not None:
+                receipt = conn.execute("SELECT plan_hash,job FROM remote_requests WHERE request_id=?", (request_id,)).fetchone()
+                if receipt:
+                    require(receipt["plan_hash"] == plan_hash, "기존 원격 요청 ID의 계획이 일치하지 않습니다.")
+                    return receipt["job"]
             existing = conn.execute(
                 "SELECT id FROM jobs WHERE run_key=? AND state NOT IN ('SUCCEEDED','MERGED','FAILED','CANCELLED')", (key,)
             ).fetchone()
             if existing:
+                if request_id is not None:
+                    conn.execute("INSERT INTO remote_requests VALUES (?,?,?)", (request_id, plan_hash, existing["id"]))
                 return existing["id"]
             job = uuid.uuid4().hex
             conn.execute("INSERT INTO jobs(id,run_key,plan,config,foreground,state,created,updated) VALUES (?,?,?,?,?,'QUEUED',?,?)",
@@ -89,7 +108,29 @@ class Store:
             conn.executemany("INSERT INTO tasks(job,id,state) VALUES (?,?,'QUEUED')",
                              ((job, task["id"]) for task in plan["tasks"]))
             self.event_tx(conn, job, None, "job.state", {"state": "QUEUED"})
+            if request_id is not None:
+                conn.execute("INSERT INTO remote_requests VALUES (?,?,?)", (request_id, plan_hash, job))
             return job
+
+    def remote_receipt(self, request_id):
+        with self.connect() as conn:
+            return conn.execute("SELECT job FROM remote_requests WHERE request_id=?", (request_id,)).fetchone()
+
+    def queue_remote(self, host, plan):
+        key = uuid.uuid4().hex
+        with self.connect(write=True) as conn:
+            conn.execute("INSERT INTO remote_runs VALUES (?,?,?,NULL,?)", (key, host, encode(plan), time.time()))
+        return key
+
+    def remote_runs(self):
+        with self.connect() as conn:
+            return [self.decode(row) for row in conn.execute("SELECT * FROM remote_runs ORDER BY created DESC LIMIT 200")]
+
+    def remember_remote(self, key, job):
+        with self.connect(write=True) as conn:
+            row = conn.execute("SELECT remote_job FROM remote_runs WHERE id=?", (key,)).fetchone()
+            require(row and row["remote_job"] in (None, job), "원격 실행의 ID가 변경되었습니다.")
+            conn.execute("UPDATE remote_runs SET remote_job=? WHERE id=?", (job, key))
 
     @staticmethod
     def decode(row):
@@ -114,20 +155,42 @@ class Store:
         with self.connect() as conn:
             return {row["id"]: self.decode(row) for row in conn.execute("SELECT * FROM tasks WHERE job=?", (job,))}
 
+    @staticmethod
+    def event_record(row):
+        route = json.loads(row["route"]) if row["route"] else {}
+        return {
+            "run_id": row["job"], "task_id": row["task"], "agent_id": route.get("agent_id"),
+            "model_id": route.get("model_id"), "runtime_id": route.get("runtime_id"),
+            "harness_id": route.get("harness_id"), "worktree_id": route.get("worktree_id"),
+            "seq": row["seq"], "event_type": row["type"], "timestamp": row["at"],
+            "payload_ref": f"sqlite:events:{row['seq']}", "payload": json.loads(row["payload"]),
+        }
+
     def events(self, job, after=0, limit=500):
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM events WHERE job=? AND seq>? ORDER BY seq LIMIT ?", (job, after, limit))
-            result = []
-            for row in rows:
-                route = json.loads(row["route"]) if row["route"] else {}
-                result.append({
-                    "run_id": row["job"], "task_id": row["task"], "agent_id": route.get("agent_id"),
-                    "model_id": route.get("model_id"), "runtime_id": route.get("runtime_id"),
-                    "harness_id": route.get("harness_id"), "worktree_id": route.get("worktree_id"),
-                    "seq": row["seq"], "event_type": row["type"], "timestamp": row["at"],
-                    "payload_ref": f"sqlite:events:{row['seq']}", "payload": json.loads(row["payload"]),
-                })
-            return result
+            return self.events_tx(conn, job, after, limit)
+
+    def events_tx(self, conn, job, after, limit):
+        rows = conn.execute("SELECT * FROM events WHERE job=? AND seq>? ORDER BY seq LIMIT ?", (job, after, limit))
+        return [self.event_record(row) for row in rows]
+
+    def status_snapshot(self, job, after, limit):
+        with self.connect() as conn:
+            conn.execute("BEGIN")
+            item = self.decode(conn.execute("SELECT * FROM jobs WHERE id=?", (job,)).fetchone())
+            require(item, "원격 실행을 찾을 수 없습니다.")
+            events = self.events_tx(conn, job, after, limit)
+            tasks = {row["id"]: self.decode(row) for row in conn.execute("SELECT * FROM tasks WHERE job=?", (job,))}
+            return item, tasks, events
+
+    def recent_events(self, job=None, limit=200):
+        with self.connect() as conn:
+            if job is None:
+                rows = conn.execute("""SELECT seq,job,task,type,at,route,payload
+                    FROM events WHERE job IN (SELECT id FROM jobs) ORDER BY seq DESC LIMIT ?""", (limit,))
+            else:
+                rows = conn.execute("SELECT * FROM events WHERE job=? ORDER BY seq DESC LIMIT ?", (job, limit))
+            return [self.event_record(row) for row in rows]
 
     def report(self, job):
         item = self.job(job)
@@ -181,8 +244,8 @@ class Store:
 
     def claim(self, job, owner):
         with self.connect(write=True) as conn:
-            row = conn.execute("SELECT state,action FROM jobs WHERE id=?", (job,)).fetchone()
-            if not row or row["state"] not in ("QUEUED", "RETRY_WAIT", "MERGE_QUEUED"):
+            row = conn.execute("SELECT state,owner FROM jobs WHERE id=?", (job,)).fetchone()
+            if not row or row["owner"] is not None or row["state"] not in ("QUEUED", "RETRY_WAIT", "MERGE_QUEUED"):
                 return False
             state = "MERGING" if row["state"] == "MERGE_QUEUED" else "PREPARING"
             now = time.time()
@@ -197,18 +260,26 @@ class Store:
 
     def set_job(self, job, state, details=None, release=True, result=None):
         with self.connect(write=True) as conn:
+            row = conn.execute("SELECT action FROM jobs WHERE id=?", (job,)).fetchone()
+            require(row, "작업을 찾을 수 없습니다.")
+            if row["action"] == "cancel":
+                if not release:
+                    return False
+                if state != "CANCELLED":
+                    state, details, result = "CANCELLED", {"reason": "cancel_requested"}, None
             conn.execute("""UPDATE jobs SET state=?,updated=?,
                 action=CASE WHEN ? THEN NULL ELSE action END,owner=CASE WHEN ? THEN NULL ELSE owner END,
                 result=COALESCE(?,result) WHERE id=?""",
                          (state, time.time(), release, release, encode(result) if result is not None else None, job))
-            self.event_tx(conn, job, None, "job.state", {"state": state, **(details or {})})
+            self.event_tx(conn, job, None, "job.state", {**(details or {}), "state": state})
+            return True
 
     def set_task(self, job, task, state, *, attempt=None, retry_after=0, result=None, route=None):
         with self.connect(write=True) as conn:
             conn.execute("""UPDATE tasks SET state=?,attempt=COALESCE(?,attempt),available=?,
                         result=COALESCE(?,result) WHERE job=? AND id=?""",
                          (state, attempt, time.time() + retry_after, encode(result) if result is not None else None, job, task))
-            self.event_tx(conn, job, task, "task.state", {"state": state, "attempt": attempt, **(result or {})}, route)
+            self.event_tx(conn, job, task, "task.state", {**(result or {}), "state": state, "attempt": attempt}, route)
 
     def checkpoint(self, job, task, data, route):
         with self.connect(write=True) as conn:
@@ -256,21 +327,25 @@ class Store:
                 conn.execute("UPDATE tasks SET state='QUEUED' WHERE job=? AND state='AWAITING_TOOL'", (job,))
                 conn.execute("UPDATE jobs SET state='QUEUED',updated=? WHERE id=?", (time.time(),job))
 
-    def request(self, job, action, candidate=None):
+    def request(self, job, action, candidate=None, *, approval_revision=None):
         with self.connect(write=True) as conn:
             row = self.decode(conn.execute("SELECT * FROM jobs WHERE id=?", (job,)).fetchone())
             require(row, "작업을 찾을 수 없습니다.")
             state = row["state"]
             if action == "merge":
-                require(state == "AWAITING_APPROVAL" and candidate and (row["result"] or {}).get("candidate") == candidate,
+                result = row["result"] or {}
+                require(state == "AWAITING_APPROVAL" and candidate and result.get("candidate") == candidate,
                         "현재 QA 후보에 대한 승인이 필요합니다.")
+                if approval_revision is not None:
+                    require(result.get("approval_revision") == approval_revision,
+                            "QA 검증이 갱신되었습니다. 현재 후보를 다시 검토하세요.")
                 state = "MERGE_QUEUED"
             elif action == "retry":
                 require(state == "FAILED", "실패한 작업만 재시도할 수 있습니다.")
                 require(not conn.execute("SELECT 1 FROM calls WHERE job=? AND state='started'", (job,)).fetchone(),
                         "완료 여부가 불명확한 외부 쓰기 호출이 있어 자동 재개할 수 없습니다.")
                 state = "QUEUED"
-                conn.execute("UPDATE tasks SET state='QUEUED',attempt=0,result=NULL WHERE job=? AND state!='SUCCEEDED'", (job,))
+                conn.execute("UPDATE tasks SET state='QUEUED',attempt=0,available=0,result=NULL WHERE job=? AND state!='SUCCEEDED'", (job,))
             else:
                 require(action == "cancel" and state not in ("SUCCEEDED", "MERGED", "FAILED", "CANCELLED", "MERGING"),
                         "현재 상태에서는 중지할 수 없습니다.")

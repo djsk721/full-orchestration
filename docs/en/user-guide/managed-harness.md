@@ -8,7 +8,7 @@ The Managed Harness lets the app control task Context, tool policies, repetition
 
 ## Desktop workflow
 
-1. Under **모델 및 실행 설정** (Model and execution settings), include `managed` in the Model's allowed Harnesses and link the Model to its local Runtime.
+1. Under **설정 → 고급 JSON** (Settings → Advanced JSON), include `managed` in the Model's allowed Harnesses and link the Model to its local Runtime.
 2. In **새 작업** (New job), set the node's `harness` to `managed`. Use `read_paths` to narrow reads and `paths` to limit Developer writes.
 3. In **작업 대시보드** (Job dashboard), inspect `runtime.snapshot`, `context.compaction`, `task.checkpoint`, and `model.usage` as they appear. Use **도구 승인 검토** (Review tool approval) to inspect and approve or deny an external write's arguments.
 4. For Git changes, use a separate Reviewer node and integration QA. Git merge and external tool calls have their own approval steps.

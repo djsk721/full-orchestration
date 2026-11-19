@@ -8,7 +8,7 @@ Managed Harness는 앱이 작업의 Context, 도구 정책, 반복 제한, 체�
 
 ## GUI 사용 방법
 
-1. **모델 및 실행 설정**에서 Model이 허용하는 Harness 목록에 `managed`를 포함합니다. Model에 로컬 Runtime을 연결합니다.
+1. **설정 → 고급 JSON**에서 Model이 허용하는 Harness 목록에 `managed`를 포함합니다. Model에 로컬 Runtime을 연결합니다.
 2. **새 작업**에서 노드의 `harness`를 `managed`로 설정합니다. 필요에 따라 `read_paths`로 읽기를 좁히고, Developer 노드에서는 `paths`로 쓰기 범위를 좁힙니다.
 3. **작업 대시보드**의 `runtime.snapshot`, `context.compaction`, `task.checkpoint`, `model.usage`를 확인합니다. 외부 도구 쓰기는 **도구 승인 검토**에서 호출 인자를 검토해 승인하거나 거절합니다.
 4. Git 파일 변경은 별도의 Reviewer 노드와 통합 QA로 확인할 수 있습니다. 병합 승인은 도구 쓰기 승인과 각각 적용됩니다.

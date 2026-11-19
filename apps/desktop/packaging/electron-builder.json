@@ -1,0 +1,23 @@
+{
+  "appId": "io.github.djsk721.full-orchestration.preview",
+  "files": [
+    "build/main/electron/**/*",
+    "build/main/src/contracts.js",
+    "build/renderer/**/*",
+    "build/main/adapters/**/*",
+    "build/main/core/**/*"
+  ],
+  "directories": {
+    "output": "release"
+  },
+  "linux": {
+    "category": "Development",
+    "syncDesktopName": true
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ]
+  },
+  "executableName": "model-orchestration-preview"
+}

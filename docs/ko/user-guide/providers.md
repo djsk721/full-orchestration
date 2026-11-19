@@ -1,5 +1,7 @@
 # Provider 및 Model
 
+
+일반 설정은 [Provider 설정 마법사](workspace.md)로 시작합니다. 아래 JSON 절차는 **설정 → 고급 JSON**에서 사용합니다.
 <!-- feature: providers PARTIALLY_IMPLEMENTED -->
 
 ## 개념
@@ -8,7 +10,7 @@ Provider는 Model이 `local` Runtime을 쓰는지 또는 `attached` CLI를 통�
 
 ## GUI 사용 방법
 
-1. **모델 및 실행 설정**에서 **JSON 가져오기**로 예제를 열거나 **저장된 설정 열기**를 누릅니다.
+1. **설정 → 고급 JSON**에서 **JSON 가져오기**로 예제를 열거나 **저장된 설정 열기**를 누릅니다.
 2. `providers`에 `kind: "local"` 또는 `kind: "attached"`인 항목을 지정합니다. Runtime을 쓰는 Model은 `runtimes`와 `models`를 연결합니다. **설정 저장**은 스키마 검증을 수행합니다.
 3. **새 작업**에서 노드의 `model`과 `harness`에 각각 레지스트리 ID를 지정하거나 생략해 자동 선택을 사용합니다.
 4. 읽기 전용 Agent 작업을 제출하고 대시보드의 `runtime.snapshot`과 `route.failed`를 확인합니다. 연결 검증은 실행 중에 진행됩니다.

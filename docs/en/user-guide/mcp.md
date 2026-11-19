@@ -10,7 +10,7 @@ Model Context Protocol (MCP) connects Agents to external tools. MCP profiles liv
 
 1. In **MCP 연결** (MCP connections), choose **사용자 설정 탐색** (Scan user settings) or **프로젝트 탐색** (Scan project). The scan checks known paths for Codex, OpenCode, Claude Code, Gemini CLI, and Antigravity.
 2. Select a server to see its path, scope, fingerprint, enabled state, and possible conflicts. The enabled state reflects the source file.
-3. For a Managed job, save each allowed tool and role under `mcp.<profile>.tools` in **모델 및 실행 설정** (Model and execution settings). Add the virtual name to the node's `tools` list in **새 작업** (New job). Omit it to keep it from the node.
+3. For a Managed job, save each allowed tool and role under `mcp.<profile>.tools` in **설정 → 고급 JSON** (Settings → Advanced JSON). Add the virtual name to the node's `tools` list in **새 작업** (New job). Omit it to keep it from the node.
 4. Submit a read-only job and inspect `route.failed`, `tool.call`, and the result. Migration to the Gateway has a separate read-only probe in the UI.
 
 ## Example

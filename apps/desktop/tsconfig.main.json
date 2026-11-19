@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "rootDir": ".",
+    "outDir": "build/main",
+    "strict": true,
+    "verbatimModuleSyntax": false,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "electron/**/*.ts",
+    "src/contracts.ts",
+    "tests/*.test.ts",
+    "core/**/*.ts",
+    "adapters/**/*.ts",
+    "tools/**/*.ts"
+  ]
+}

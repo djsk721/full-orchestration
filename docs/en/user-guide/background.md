@@ -8,7 +8,7 @@ Foreground jobs are tied to a live desktop session. With Background Execution, a
 
 ## Desktop workflow
 
-1. Under **모델 및 실행 설정** (Model and execution settings), save `"background": true` in `settings`.
+1. Enable execution after closing the app under **Settings → Execution and notifications**.
 2. In **새 작업** (New job), add `"background": true` at the plan's top level and submit it.
 3. Check the mode and state in the dashboard. Close and reopen the window to see jobs, history, and events from the same data directory.
 4. Use **중지** (Stop) for active jobs and **재시도** (Retry) for failed jobs. **Supervisor 종료** (Stop Supervisor) is a separate action that can interrupt background work.

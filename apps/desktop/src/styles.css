@@ -1,0 +1,49 @@
+:root {
+  color: #152744;
+  background: #edf2f7;
+  font: 16px/1.55 system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { background: #142640; color: #fff; }
+.header-inner, main { max-width: 1440px; margin: auto; padding: 1.5rem clamp(1rem, 4vw, 3rem); }
+header p { margin: .25rem 0 0; color: #d3e1f3; }
+h1, h2, h3 { line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(1.55rem, 3vw, 2.15rem); letter-spacing: -.025em; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1.03rem; }
+.dashboard { display: grid; grid-template-columns: minmax(14rem, 19rem) minmax(0, 1fr); gap: 1.25rem; }
+aside, .workspace { background: #fff; border: 1px solid #ced8e5; border-radius: .8rem; padding: 1.15rem; }
+.job-list, .workflow, .events { list-style: none; padding: 0; margin: .9rem 0 0; }
+.job-list { display: grid; gap: .55rem; }
+.job-list button {
+  width: 100%;
+  display: grid;
+  gap: .15rem;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: #f4f7fb;
+  padding: .65rem .75rem;
+  border: 1px solid #d4dfeb;
+  border-radius: .5rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.job-list button:hover, .job-list button[aria-pressed="true"] { background: #e3edfc; border-color: #4673ae; }
+button:focus-visible { outline: 3px solid #2459ad; outline-offset: 2px; }
+.job-list span, .job-list time, .muted, .node span, .dependency { color: #4a5f79; font-size: .9rem; }
+.detail-heading { display: flex; align-items: start; justify-content: space-between; gap: .75rem; overflow-wrap: anywhere; }
+.state { white-space: nowrap; background: #e6eef9; color: #1d447a; padding: .15rem .55rem; border-radius: 1rem; font-size: .85rem; }
+article section { padding-top: 1rem; margin-top: 1rem; border-top: 1px solid #dfe6ef; }
+.workflow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .7rem; }
+.workflow li { display: grid; align-content: start; padding: .55rem .7rem; background: #f4f7fb; border-left: 3px solid #4673ae; border-radius: .35rem; overflow-wrap: anywhere; }
+.node { display: grid; }
+.dependency { margin: .4rem 0 0; }
+.events li { display: flex; flex-wrap: wrap; gap: .5rem; padding: .35rem 0; border-bottom: 1px solid #e5ebf2; font-size: .9rem; }
+.events time { font-variant-numeric: tabular-nums; color: #4a5f79; }
+code { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .dashboard { grid-template-columns: minmax(0, 1fr); }
+}

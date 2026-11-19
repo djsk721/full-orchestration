@@ -6,7 +6,7 @@
 
 **한국어** · [English](README.en.md)
 
-로컬 Git 저장소의 작업을 DAG로 나누고, Agent 실행부터 독립 검토, 통합 QA, 병합 승인까지 한 화면에서 관리하는 Windows 데스크톱 앱입니다.
+로컬과 SSH Git 프로젝트에서 Agent 실행, 독립 검토, 통합 QA, 병합 승인을 관리하는 Windows 데스크톱 워크스페이스입니다.
 
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-2563eb)
 ![Python 3.11+ and Tkinter](https://img.shields.io/badge/Python%203.11%2B-Tkinter-356b98)
@@ -17,15 +17,17 @@
 
 ## 스크린샷
 
-![Model Orchestration의 작업 대시보드](docs/assets/screenshots/dashboard.png)
+![Model Orchestration의 작업 대시보드](docs/assets/screenshots/workspace.png)
 
-빈 데이터 폴더로 실행한 실제 Tkinter 화면입니다. Linux 가상 디스플레이에서 캡처했으며 Windows에서는 글꼴과 창 테두리가 다를 수 있습니다.
+Linux 가상 디스플레이에서 샘플 저장소와 실제 QA 실행으로 캡처한 워크스페이스입니다.
 
 ## 주요 기능
 
 | 기능 | 사용 범위 |
 | --- | --- |
-| Provider 및 Model | 앱의 JSON 편집기에서 로컬 Runtime과 신뢰하는 CLI 경로를 등록하고, 작업에서 Model 및 Harness를 지정합니다. |
+| 프로젝트와 계획 | 프로젝트를 저장하고 자연어 설명과 전략을 바탕으로 실행 계획을 생성·검토합니다. |
+| Provider 및 Model | 설정 마법사에서 로컬 Runtime과 신뢰하는 CLI를 등록하고, 연결 및 모델 목록을 확인합니다. |
+| 터미널과 SSH | 통합 PTY와 SSH 프로필을 사용하고, Linux Worker의 작업을 재연결합니다. |
 | MCP | CLI 설정을 탐색하고 Managed 작업에 도구를 허용합니다. 지원되는 OpenCode JSON과 Codex TOML 연결은 Gateway로 전환하고 롤백할 수 있습니다. |
 | Multi-Agent Orchestration | 역할별 DAG 노드를 등록합니다. Supervisor가 의존성이 충족된 작업을 각각의 Git Worktree에서 실행합니다. |
 | Managed Harness | 실제 Context와 도구 호출 능력을 검사하고, 파일 범위, 반복 한도, 체크포인트 및 외부 쓰기 승인을 적용합니다. |
@@ -40,8 +42,8 @@ Tkinter Desktop과 별도 Python Supervisor는 로컬 SQLite에 작업, 상태, 
 
 1. Windows 10/11에 Git for Windows와 Python 3.11 이상을 설치합니다. Python 설치에서 Tcl/Tk와 Python Launcher를 포함하고, 터미널에서 `git --version`이 동작하는지 확인합니다.
 2. 저장소 소스를 받은 뒤 [Launch-Windows.cmd](Launch-Windows.cmd)를 실행합니다. Python Launcher 없이 실행하려면 `pythonw.exe`로 [ModelOrchestration.pyw](ModelOrchestration.pyw)를 엽니다.
-3. **모델 및 실행 설정 → JSON 가져오기**에서 [Windows 레지스트리 예제](examples/registry.windows.json)를 엽니다. 설치한 Runtime과 Model의 실제 경로를 지정한 뒤 **설정 저장**을 누릅니다.
-4. **새 작업**에서 Git 저장소와 대상 브랜치를 선택하고 작업을 제출합니다. 첫 읽기 전용 실행과 Model 없이 하는 스모크 테스트도 [시작하기](docs/ko/user-guide/getting-started.md)에 있습니다.
+3. **프로젝트**에서 저장소를 추가합니다. **설정 → Provider 설정 마법사**에서 모델을 등록합니다.
+4. **새 작업 → 계획 만들기**에서 설명을 입력하고 실행 전략을 고릅니다. SSH, 터미널 의존성 및 모델 없는 검증 전략은 [워크스페이스 가이드](docs/ko/user-guide/workspace.md)에 있습니다.
 
 Model 파일, 외부 Runtime 및 CLI는 별도로 설치합니다. Windows용 실행 파일을 소스에서 만드는 방법은 [테스트와 빌드](docs/ko/developer-guide/testing.md)를 참고하세요.
 
@@ -62,9 +64,11 @@ python -m unittest discover -s tests -v
 
 테스트는 임시 Git 저장소와 loopback 모의 서버를 사용합니다. 문서 사이트 미리 보기와 검증 명령은 [기여 가이드](CONTRIBUTING.md)에 있습니다. 변경 이력은 [CHANGELOG.md](CHANGELOG.md)를 확인하세요.
 
+Node.js 24에서 `npm ci` 후 `npm run verify -- --core-only`로 TypeScript 정책을 독립적으로 검증할 수 있습니다. `npm run verify -- --ui --package`는 Linux와 Windows에서 같은 테스트 진입점을 사용합니다. Electron 대시보드는 읽기 전용이며 실제 작업, 승인, 복구는 Python Supervisor가 담당합니다. [플랫폼별 검증·호환성 표](docs/internal/cross-platform-architecture.md)
+
 ## 로드맵
 
-SSH/Remote Execution, GUI 언어 선택과 도움말 연결, 양식 기반 Provider 설정은 [로드맵](docs/ko/roadmap.md)의 미구현 범위에 있습니다.
+분산 DAG, Windows Worker 및 추가 공급자 어댑터는 [로드맵](docs/ko/roadmap.md)에 정리했습니다.
 
 ## 라이선스
 

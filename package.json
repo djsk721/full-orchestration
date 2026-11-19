@@ -1,0 +1,20 @@
+{
+  "name": "model-orchestration-workspace",
+  "private": true,
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @orchestration/desktop",
+    "dev": "npm run dev --workspace @orchestration/desktop",
+    "test": "npm run test --workspace @orchestration/desktop",
+    "test:e2e": "npm run test:e2e --workspace @orchestration/desktop",
+    "package:linux": "npm run package:linux --workspace @orchestration/desktop",
+    "package:windows": "npm run package:windows --workspace @orchestration/desktop",
+    "inspect": "npm run inspect --workspace @orchestration/desktop --",
+    "verify": "node scripts/qa/verify.mjs"
+  }
+}

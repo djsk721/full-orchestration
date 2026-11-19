@@ -2,7 +2,7 @@
 
 ## Development environment
 
-The app uses Python 3.11 or later, the standard library, and Tcl/Tk. External dependencies are Git and any Model Runtimes or CLIs you configure. Node.js is used for documentation linting. Running the desktop requires neither Node.js nor Docker.
+The app uses Python 3.11 or later, the standard library, and Tcl/Tk. External dependencies are Git and any Model Runtimes or CLIs you configure. Node.js 24 runs the TypeScript dashboard and test tooling. The Tk desktop and Supervisor do not need Node.js.
 
 ## Testing and QA
 
@@ -23,3 +23,15 @@ Run this command on Windows. The `-InstallBuildDependency` switch installs PyIns
 ```
 
 The executable is `dist\ModelOrchestration\ModelOrchestration.exe`. This is an `--onedir` build. Distribute the entire `dist\ModelOrchestration` bundle. On a clean Windows host, check launch, Git on PATH, a QA-only job, and Supervisor startup and shutdown before distributing the bundle.
+
+## Unified and native verification
+
+```bash
+npm ci
+python -m pip install -r requirements-desktop.txt
+npm run verify -- --ui --package
+```
+
+The same command runs the TypeScript and Python suites, both desktop smoke tests and native adapter contracts on Linux and Windows. Use `npm run verify -- --core-only` for tests without Python or a desktop. On Linux, add `--ssh` to exercise a disposable OpenSSH server and Worker. Native Windows evidence is required for ConPTY, Job Objects, and the installer.
+
+The Tk workflow runs a real Supervisor from project registration through approved Git integration against a scripted model API. Electron's tests also terminate the app during a real QA command and check the result after reopening. Add `--harness` for installed CLI checks. Observe startup and credential presence separately from authenticated model execution.

@@ -1,5 +1,7 @@
 # Providers and models
 
+
+Start with the [Provider setup wizard](workspace.md) for guided registration. The JSON steps below use **Settings → Advanced JSON**.
 <!-- feature: providers PARTIALLY_IMPLEMENTED -->
 
 ## Concept
@@ -8,7 +10,7 @@ A Provider identifies whether a Model uses a `local` Runtime or is reached throu
 
 ## Desktop workflow
 
-1. In **모델 및 실행 설정** (Model and execution settings), choose **JSON 가져오기** (Import JSON) for an example or **저장된 설정 열기** (Open saved settings).
+1. In **설정 → 고급 JSON** (Model and execution settings), choose **JSON 가져오기** (Import JSON) for an example or **저장된 설정 열기** (Open saved settings).
 2. In `providers`, add an entry with `kind: "local"` or `kind: "attached"`. For a Model with a Runtime, connect the entries in `runtimes` and `models`. **설정 저장** (Save settings) checks the schema.
 3. In **새 작업** (New job), set a task's `model` and `harness` to their registry IDs, or omit them for automatic route selection.
 4. Run a read-only Agent job and check `runtime.snapshot` and `route.failed` in the dashboard. Runtime connectivity and capability checks run as part of the job.

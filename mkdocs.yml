@@ -72,6 +72,7 @@ plugins:
             홈: Home
             사용자 가이드: User guide
             시작하기: Getting started
+            프로젝트 워크스페이스: Project workspace
             Provider 및 Model: Providers and models
             작업 실행: Running jobs
             백그라운드 실행: Background Execution
@@ -93,6 +94,7 @@ nav:
   - 홈: index.md
   - 사용자 가이드:
       - 시작하기: user-guide/getting-started.md
+      - 프로젝트 워크스페이스: user-guide/workspace.md
       - Provider 및 Model: user-guide/providers.md
       - MCP: user-guide/mcp.md
       - 작업 실행: user-guide/orchestration.md

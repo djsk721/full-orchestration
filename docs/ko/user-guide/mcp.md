@@ -10,7 +10,7 @@ MCP(Model Context Protocol)는 Agent가 외부 도구를 호출하는 연결 규
 
 1. **MCP 연결 → 사용자 설정 탐색** 또는 **프로젝트 탐색**을 누릅니다. 대상은 알려진 Codex, OpenCode, Claude Code, Gemini CLI, Antigravity 설정 경로입니다.
 2. 서버를 선택해 경로, 범위, 지문, 활성 상태와 충돌 후보를 확인합니다. 이 화면에 있는 활성 상태는 원본 파일에서 읽은 값입니다.
-3. Managed 작업에서는 **모델 및 실행 설정**에서 `mcp.<profile>.tools`에 허용 도구와 역할을 저장하고, **새 작업**에서 노드의 `tools`에 가상 이름을 추가합니다. 작업에서 빼면 해당 노드에 노출하지 않습니다.
+3. Managed 작업에서는 **설정 → 고급 JSON**에서 `mcp.<profile>.tools`에 허용 도구와 역할을 저장하고, **새 작업**에서 노드의 `tools`에 가상 이름을 추가합니다. 작업에서 빼면 해당 노드에 노출하지 않습니다.
 4. 읽기 작업을 제출하고 `route.failed`, `tool.call`과 결과를 확인하세요. Gateway로 전환하는 경우 UI가 별도의 읽기 Probe를 요청합니다.
 
 ## 실제 예제

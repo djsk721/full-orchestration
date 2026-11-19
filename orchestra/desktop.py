@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import json
-import os
 import queue
-import subprocess
 import threading
 import time
 import tkinter as tk
+from tkinter import font as tkfont
 import uuid
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from .core import Invalid, atomic_json, config_check, defaults, plan_check, require
+from .core import atomic_json, config_check, plan_check, require
 from .discovery import discover, migrate, rollback
+from .platform.desktop import open_directory, prepare_dpi
 from .store import Store
 from .supervisor import read_config, start_supervisor
 
@@ -23,7 +23,7 @@ STATES = {
     "QUEUED": "대기", "PREPARING": "준비 중", "RUNNING": "실행 중", "VERIFYING": "검증 중",
     "RETRY_WAIT": "재시도 대기", "AWAITING_TOOL": "도구 승인 대기", "AWAITING_APPROVAL": "병합 승인 대기",
     "MERGE_QUEUED": "병합 준비", "MERGING": "병합 중", "MERGED": "병합 완료",
-    "SUCCEEDED": "완료", "FAILED": "실패", "CANCELLED": "중지",
+    "NOT_EXECUTED": "미실행", "SUCCEEDED": "완료", "FAILED": "실패", "CANCELLED": "중지",
 }
 
 
@@ -43,6 +43,8 @@ def sample_plan():
 
 
 class Desktop:
+    initial_page = "jobs"
+
     def __init__(self, window, root):
         self.window, self.root, self.store = window, root, Store(root)
         self.token = uuid.uuid4().hex
@@ -72,19 +74,24 @@ class Desktop:
             self.notifications = read_config(self.root)["settings"].get("notifications", False)
         except (OSError, ValueError, TypeError):
             pass
-        self.show("jobs")
+        self.show(self.initial_page)
         self.tick()
 
     def style(self):
         style = ttk.Style()
         style.theme_use("clam")
-        self.window.option_add("*Font", ("Segoe UI", 10))
-        style.configure(".", font=("Segoe UI", 10), foreground=TEXT)
+        names = {family.casefold(): family for family in tkfont.families(self.window)}
+        candidates = ("Segoe UI", "Noto Sans CJK KR", "NanumGothic", "DejaVu Sans")
+        self.ui_font = next((names[item.casefold()] for item in candidates if item.casefold() in names), "TkDefaultFont")
+        mono = ("Consolas", "NanumGothicCoding", "DejaVu Sans Mono")
+        self.mono_font = next((names[item.casefold()] for item in mono if item.casefold() in names), "TkFixedFont")
+        self.window.option_add("*Font", (self.ui_font, 10))
+        style.configure(".", font=(self.ui_font, 10), foreground=TEXT)
         style.configure("TFrame", background=BG)
         style.configure("TLabel", background=BG, foreground=TEXT)
         style.configure("Muted.TLabel", foreground=MUTED, background=BG)
-        style.configure("Heading.TLabel", font=("Segoe UI", 23, "bold"), background=BG)
-        style.configure("Section.TLabel", font=("Segoe UI", 12, "bold"), background=BG)
+        style.configure("Heading.TLabel", font=(self.ui_font, 23, "bold"), background=BG)
+        style.configure("Section.TLabel", font=(self.ui_font, 12, "bold"), background=BG)
         style.configure("TButton", padding=(12, 7), background=PANEL, bordercolor="#c3d0df", relief="flat")
         style.map("TButton", background=[("active", "#dfeafa")])
         style.configure("Primary.TButton", background=BLUE, foreground="white", bordercolor=BLUE)
@@ -100,12 +107,14 @@ class Desktop:
         nav.grid(row=0, column=0, sticky="nsew")
         nav.grid_propagate(False)
         tk.Label(nav, text="Model\nOrchestration", justify="left", anchor="w", bg=NAV, fg="white",
-                 font=("Segoe UI", 21, "bold")).pack(fill="x", padx=22, pady=(27, 27))
-        navigation = (("jobs", "작업 대시보드", self.jobs_page), ("submit", "새 작업", self.submit_page),
-                      ("registry", "모델 및 실행 설정", self.registry_page), ("mcp", "MCP 연결", self.mcp_page))
+                 font=(self.ui_font, 21, "bold")).pack(fill="x", padx=22, pady=(27, 27))
+        navigation = self.navigation()
         for key, text, _ in navigation:
+            if not text:
+                continue
             btn = tk.Button(nav, text=text, anchor="w", padx=11, pady=11, bg=NAV, fg="#eff5ff", bd=0,
                             activebackground=NAV_ACTIVE, activeforeground="white", cursor="hand2",
+                            relief="flat", highlightthickness=1, highlightbackground=NAV, highlightcolor="#85abdc",
                             command=lambda name=key: self.show(name))
             btn.pack(fill="x", padx=11, pady=2)
             self.nav_buttons[key] = btn
@@ -119,6 +128,10 @@ class Desktop:
         for key, _, factory in navigation:
             self.pages[key] = factory()
             self.pages[key].grid(row=0, column=0, sticky="nsew")
+
+    def navigation(self):
+        return (("jobs", "작업 대시보드", self.jobs_page), ("submit", "새 작업", self.submit_page),
+                ("registry", "모델 및 실행 설정", self.registry_page), ("mcp", "MCP 연결", self.mcp_page))
 
     def show(self, key):
         self.view = key
@@ -143,14 +156,13 @@ class Desktop:
         button.pack(side=side, padx=(0, 6), pady=4)
         return button
 
-    @staticmethod
-    def text(parent, row, *, size=10):
+    def text(self, parent, row, *, size=10):
         host = ttk.Frame(parent)
         host.grid(row=row, column=0, sticky="nsew", pady=(3, 0))
         host.columnconfigure(0, weight=1)
         host.rowconfigure(0, weight=1)
         field = tk.Text(host, wrap="word", bg=PANEL, fg=TEXT, insertbackground=TEXT, undo=True, padx=12, pady=10,
-                        font=("Consolas", size), relief="flat", highlightthickness=1, highlightbackground="#cbd7e6")
+                        font=(self.mono_font, size), relief="flat", highlightthickness=1, highlightbackground="#cbd7e6")
         scroll = ttk.Scrollbar(host, orient="vertical", command=field.yview)
         field.configure(yscrollcommand=scroll.set)
         field.grid(row=0, column=0, sticky="nsew")
@@ -387,7 +399,8 @@ class Desktop:
                     return
             if action == "cancel" and not messagebox.askyesno("작업 중지", "선택한 작업을 중지하시겠습니까?", parent=self.window):
                 return
-            self.store.request(job["id"], action, candidate)
+            self.store.request(job["id"], action, candidate,
+                               approval_revision=(job["result"] or {}).get("approval_revision") if candidate else None)
             if action != "cancel":
                 self.store.attach_foreground(job["id"], self.token)
                 self.restart_supervisor()
@@ -441,10 +454,7 @@ class Desktop:
             job = self.get_job()
             path = self.root / "artifacts" / job["id"]
             require(path.is_dir(), "저장된 작업 결과가 없습니다.")
-            if os.name == "nt":
-                os.startfile(path)
-            else:
-                subprocess.Popen(["xdg-open", str(path)])
+            open_directory(path)
         self.action(open_result)
 
     def scan_project_folder(self):
@@ -562,6 +572,9 @@ class Desktop:
 
 
 def launch(root):
+    prepare_dpi()
     window = tk.Tk()
-    Desktop(window, root)
+    from .workspace_desktop import WorkspaceDesktop
+
+    WorkspaceDesktop(window, root)
     window.mainloop()

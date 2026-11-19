@@ -173,13 +173,28 @@
     }
   },
   "remote": {
-    "status": "PLANNED",
+    "status": "PARTIALLY_IMPLEMENTED",
     "primary": "roadmap.md",
     "related": [
-      "admin-guide/operations.md"
+      "admin-guide/operations.md",
+      "user-guide/workspace.md"
     ],
-    "evidence": {},
-    "tests": {}
+    "evidence": {
+      "orchestra/ssh.py": [
+        "SSHClient",
+        "trust_key"
+      ],
+      "orchestra/remote.py": [
+        "dispatch",
+        "register_project"
+      ]
+    },
+    "tests": {
+      "tests/test_workspace.py": [
+        "test_host_key_pinning_has_no_insecure_transport_fallback",
+        "test_remote_protocol_executes_and_recovers_one_id"
+      ]
+    }
   },
   "desktop-localization": {
     "status": "PLANNED",
@@ -196,18 +211,28 @@
     "tests": {}
   },
   "setup-ui": {
-    "status": "PLANNED",
+    "status": "PARTIALLY_IMPLEMENTED",
     "primary": "roadmap.md",
     "related": [
-      "user-guide/getting-started.md"
+      "user-guide/getting-started.md",
+      "user-guide/workspace.md"
     ],
     "evidence": {
-      "orchestra/desktop.py": [
-        "registry_page",
-        "submit_page"
+      "orchestra/workspace_forms.py": [
+        "guided_dialog",
+        "provider_wizard"
+      ],
+      "orchestra/workspace.py": [
+        "draft_plan",
+        "save_registry"
       ]
     },
-    "tests": {}
+    "tests": {
+      "tests/test_workspace.py": [
+        "test_project_and_guided_qa_work_without_models",
+        "test_registry_migrates_preserves_supported_values_and_backs_up"
+      ]
+    }
   },
   "live-integration": {
     "status": "NOT_VERIFIED",
@@ -219,11 +244,11 @@
       "Build-Windows.ps1": [
         "PyInstaller"
       ],
-      "orchestra/processes.py": [
-        "CreateJobObjectW"
-      ],
       "orchestra/runtime.py": [
         "gpu_layers"
+      ],
+      "orchestra/platform/processes_windows.py": [
+        "CreateJobObjectW"
       ]
     },
     "tests": {}

@@ -27,3 +27,7 @@
 `store.py` manages jobs, nodes, events, approvals, and calls in SQLite with WAL. The Supervisor claims jobs and renews heartbeats. Following a crash, work held by a previous owner is handled after lease expiry. Background nodes can continue from checkpoints, while foreground nodes require live client presence.
 
 Managed checkpoints contain the current step, route, messages, pending calls, and tool fingerprint. Completed external write results can be reused. Writes with uncertain outcomes block replay. An interrupted Attached CLI has more limited recovery. See [Operations](../admin-guide/operations.md) for what is persisted and exported.
+
+## Workspace and execution environments
+
+`workspace_desktop.py` extends the original desktop's run and approval paths with projects, guided plans, Agents, and terminals. Forms call services in `workspace.py` and the original validators. Operator terminals use independent PTYs, while Agent reporting reads Supervisor events. Linux `remote.py` accepts a narrow OpenSSH protocol and delegates execution to the existing Supervisor on the server. SQLite maps the remote request ID to the job transactionally, so reconnecting can find the same execution. [Setup and security](../user-guide/workspace.md)

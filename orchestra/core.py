@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from .platform import filesystem
+from .platform.filesystem import case_sensitive_paths
+from .platform.filesystem import path_in as scope_matches
+
+
+atomic_bytes = filesystem.atomic_bytes
+data_directory = filesystem.data_directory
 
 
 class Invalid(ValueError):
@@ -38,33 +44,13 @@ def digest(value: Any) -> str:
     return hashlib.sha256(encode(value).encode("utf-8")).hexdigest()
 
 
-def atomic_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, name = tempfile.mkstemp(prefix=".orchestra-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(name, path)
-    finally:
-        Path(name).unlink(missing_ok=True)
-
-
 def atomic_json(path: Path, value: Any) -> None:
     atomic_bytes(path, (json.dumps(value, ensure_ascii=False, sort_keys=False, indent=2) + "\n").encode("utf-8"))
 
 
-def data_directory() -> Path:
-    override = os.environ.get("ORCHESTRA_DATA")
-    if override:
-        return Path(override).expanduser().resolve()
-    base = os.environ.get("LOCALAPPDATA") if os.name == "nt" else os.environ.get("XDG_DATA_HOME")
-    return Path(base or Path.home() / ".local" / "share") / "ModelOrchestration"
-
-
 def defaults() -> dict:
     return {
+        "schema_version": 1,
         "settings": {
             "background": False, "parallel_jobs": 2, "parallel_tasks": 3,
             "heartbeat_sec": 15, "lease_sec": 90, "job_timeout_sec": 14400,
@@ -119,7 +105,9 @@ def settings(config: dict) -> dict:
 def config_check(config: Any) -> dict:
     require(isinstance(config, dict), "설정은 JSON 객체여야 합니다.")
     require(set(config) <= set(defaults()), "알 수 없는 최상위 설정이 있습니다.")
-    result = defaults() | config
+    version = config.get("schema_version", 0)
+    require(type(version) is int and version in (0, 1), "지원하지 않는 레지스트리 설정 버전입니다.")
+    result = defaults() | config | {"schema_version": 1}
     require(isinstance(result["settings"], dict), "settings는 객체여야 합니다.")
     cfg = settings(result)
     require(set(cfg) <= set(defaults()["settings"]), "알 수 없는 실행 설정이 있습니다.")
@@ -199,6 +187,9 @@ def config_check(config: Any) -> dict:
         for rule in tool_rules.values():
             require(isinstance(rule, dict) and rule.get("access") in ("read", "write"), "MCP 도구 접근 유형이 필요합니다.")
             require(set(string_list(rule.get("roles", []), "MCP roles")) <= set(ROLES), "잘못된 MCP 역할입니다.")
+            for agent in string_list(rule.get("agents", []), "MCP agents"):
+                role, separator, task_id = agent.partition("/")
+                require(separator and role in ROLES and IDENTIFIER.fullmatch(task_id), "MCP Agent ID는 역할/노드ID 형식입니다.")
             flag(rule.get("native", False), "MCP native")
     return result
 
@@ -216,8 +207,7 @@ def scope_path(value: Any) -> str:
 
 
 def path_in(path: str, scopes: list[str]) -> bool:
-    key = path.casefold()
-    return any(key == scope.casefold() or key.startswith(scope.casefold() + "/") for scope in scopes)
+    return scope_matches(path, scopes, case_sensitive=case_sensitive_paths())
 
 
 def plan_check(plan: Any, cfg: dict) -> dict:

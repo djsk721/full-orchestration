@@ -16,7 +16,7 @@
 
 - Model HTTP Runtimes use loopback. For an attached Runtime with bearer authentication, store the value in the variable named by `auth_env`. Managed llama.cpp and OpenCode's local Runtime route require a local address without authentication.
 - Subscription CLIs use the current account's existing login. Enable `trusted`, `allow_unverified`, `inherit_environment`, and `allow_write` only as needed for a trusted CLI and Workspace. CLI permissions and Git checks provide limited isolation.
-- The desktop has no configuration for SSH hosts, keys, passphrases, `known_hosts`, or remote Workspaces. See the [Remote Execution roadmap](../roadmap.md).
+- SSH uses app-managed public host key pins and the existing SSH Agent or a key file reference. Linux Workers run in explicitly registered Git repositories. [Workspace guide](../user-guide/workspace.md)
 - QA argv executes with the user's privileges. Approve only trusted job definitions and repositories, and use a dedicated unprivileged account with appropriate OS file and network access controls.
 
 ## MCP policy

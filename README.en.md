@@ -6,7 +6,7 @@
 
 [한국어](README.md) · **English**
 
-A Windows desktop app that turns work in a local Git repository into a task DAG, with Agent runs, independent review, integration QA, and merge approval in one place.
+A Windows desktop workspace for Agent runs, independent review, integration QA, and merge approval across local and SSH Git projects.
 
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-2563eb)
 ![Python 3.11+ and Tkinter](https://img.shields.io/badge/Python%203.11%2B-Tkinter-356b98)
@@ -17,15 +17,17 @@ A Windows desktop app that turns work in a local Git repository into a task DAG,
 
 ## Screenshot
 
-![Model Orchestration job dashboard](docs/assets/screenshots/dashboard.png)
+![Model Orchestration job dashboard](docs/assets/screenshots/workspace.png)
 
-This is the running Tkinter dashboard with a fresh data directory. The capture uses a Linux virtual display, so fonts and window borders can differ on Windows.
+The running workspace, captured on a Linux virtual display with a sample repository and an actual QA run.
 
 ## Key features
 
 | Feature | What you can do |
 | --- | --- |
-| Providers and models | Register local Runtimes and trusted CLI routes in the desktop JSON editor. Select a Model and Harness in each task. |
+| Projects and plans | Save project defaults and review task plans generated from a description and execution strategy. |
+| Providers and models | Register local runtimes and trusted CLI routes in the wizard. Check runtime connections and model lists. |
+| Terminal and SSH | Use integrated PTYs, pinned SSH host profiles, and reconnect to Linux Worker jobs. |
 | MCP | Discover CLI configurations and allow tools for Managed jobs. Migrate supported OpenCode JSON and Codex TOML bindings to the Gateway and roll them back. |
 | Multi-Agent Orchestration | Define DAG nodes by role. The Supervisor runs eligible tasks in individual Git Worktrees. |
 | Managed Harness | Probe effective Context and tool calling, then enforce file scopes, repetition limits, checkpoints, and approval for external writes. |
@@ -40,8 +42,8 @@ The Tkinter desktop and a separate Python Supervisor share a local SQLite databa
 
 1. Install Git for Windows and Python 3.11 or later on Windows 10/11, including Tcl/Tk and the Python Launcher. Confirm that `git --version` works in a terminal.
 2. Obtain the repository source and run [Launch-Windows.cmd](Launch-Windows.cmd). Without the launcher, open [ModelOrchestration.pyw](ModelOrchestration.pyw) with `pythonw.exe`.
-3. Under **모델 및 실행 설정** (Model and execution settings), choose **JSON 가져오기** (Import JSON). Load the [Windows registry example](examples/registry.windows.json), enter the installed Runtime and Model paths, and choose **설정 저장** (Save settings).
-4. Open **새 작업** (New job), pick the Git repository and target branch, and submit. [Getting started](docs/en/user-guide/getting-started.md) includes a read-only Agent run and a smoke test that needs no Model.
+3. Add a repository under **Projects** and register a model under **Settings → Provider setup wizard**.
+4. Use **New task → Create a plan** to enter a request. See the [workspace guide](docs/en/user-guide/workspace.md) for SSH, terminal dependencies and model-free QA.
 
 Install Model files, external Runtimes, and CLIs separately. For a Windows executable built from source, see [Testing and builds](docs/en/developer-guide/testing.md).
 
@@ -62,9 +64,11 @@ python -m unittest discover -s tests -v
 
 The suite uses temporary Git repositories and loopback fixtures. See the [contribution guide](CONTRIBUTING.en.md) for site preview and validation commands and [CHANGELOG.md](CHANGELOG.md) for the change history.
 
+With Node.js 24, run `npm ci` and `npm run verify -- --core-only` to check the portable TypeScript policies. `npm run verify -- --ui --package` uses the same entry point on Linux and Windows. The Electron dashboard reads existing work; the Python Supervisor runs jobs, handles approvals, and recovers state. [Platform verification and compatibility](docs/internal/cross-platform-architecture.md)
+
 ## Roadmap
 
-See the [Roadmap](docs/en/roadmap.md) for SSH/Remote Execution, desktop language selection and help links, and form-based Provider setup.
+See the [roadmap](docs/en/roadmap.md) for distributed DAGs, a Windows Worker and additional provider adapters.
 
 ## License
 

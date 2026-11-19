@@ -7,3 +7,8 @@ dist/
 /.venv-docs/
 /site/
 /scripts/docs/node_modules/
+
+/node_modules/
+/apps/desktop/release/
+/apps/desktop/test-results/
+/apps/desktop/playwright-report/

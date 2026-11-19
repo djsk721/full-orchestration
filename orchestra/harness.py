@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .core import Invalid, SECRET_FILE, Stopped, atomic_bytes, atomic_json, digest, encode, path_in, require, scope_path
 from .mcp import MCPClient, do_call, published, virtual_name
+from .platform.filesystem import is_link_or_reparse
 from .processes import env_for_process, run
 from .runtime import usage_payload
 
@@ -25,7 +26,7 @@ def workspace_path(root, name, scopes=None):
     require(scopes is None or path_in(name, scopes), "요청이 허용 경로 범위를 벗어났습니다.")
     path = root.joinpath(*name.split("/"))
     require(path.resolve().is_relative_to(root.resolve()) and not any(
-        entry.is_symlink() or getattr(entry, "is_junction", lambda: False)()
+        is_link_or_reparse(entry)
         for entry in (path, *list(path.parents)[:len(Path(name).parts)-1])
     ), "Worktree 밖의 경로나 링크에는 접근할 수 없습니다.")
     return path
@@ -71,7 +72,7 @@ class Managed:
             if not names.intersection(candidates):
                 continue
             with MCPClient(spec) as client:
-                available = published(key, spec, client.catalog(), self.task["role"], names)
+                available = published(key, spec, client.catalog(), self.task["role"], names, agent=self.route.event(self.task)["agent_id"])
             for alias, (original, tool, rule) in available.items():
                 require(alias not in self.remote, "MCP 도구 이름이 충돌합니다.")
                 self.remote[alias] = (spec, key, original, tool, rule)
@@ -106,6 +107,7 @@ class Managed:
             require(isinstance(args["content"], str) and len(args["content"].encode()) <= 100000,
                     "파일 내용이 쓰기 한도를 초과했습니다.")
             atomic_bytes(path, args["content"].encode())
+            self.emit("file.changed", {"file": args["path"]})
             return {"written": True, "path": args["path"]}
         require(name in self.remote, "허용되지 않은 도구입니다.")
         spec, profile, original, tool, rule = self.remote[name]
@@ -120,7 +122,7 @@ class Managed:
                 raise AwaitApproval("외부 쓰기 승인 대기")
             require(decision == "approved", "외부 쓰기 요청이 거절되었습니다.")
         with MCPClient(spec) as client:
-            current = published(profile, spec, client.catalog(), self.task["role"], {name})
+            current = published(profile, spec, client.catalog(), self.task["role"], {name}, agent=self.route.event(self.task)["agent_id"])
             require(name in current and current[name][1] == tool, "MCP 도구 스키마가 변경되었습니다.")
             if not write:
                 return do_call(client, original, tool, args)
@@ -244,9 +246,9 @@ class Managed:
 def attached(route, task, cwd, client, validated, emit, stop):
     cfg = route.harness
     code, raw = run([cfg["executable"], "--version"], cwd=cwd, env=env_for_process(), timeout=10, stop=stop)
-    match = re.search(rb"\b(\d+)\.\d+\.\d+(?:[-.+][a-zA-Z0-9.-]+)?", raw)
+    match = re.search(rb"\bv?((\d+)\.\d+\.\d+(?:[-.+][a-zA-Z0-9.-]+)?)\b", raw)
     require(code == 0 and match, "Attached CLI 버전을 관측할 수 없습니다.")
-    version = match[0].decode()
+    version = match[1].decode()
     writing = bool(task.get("paths"))
     require(not writing or cfg["kind"] == "opencode" and client and cfg.get("allow_write", False),
             "이 Attached 경로는 Worktree 쓰기 승인이 없습니다.")
@@ -258,7 +260,7 @@ def attached(route, task, cwd, client, validated, emit, stop):
     prompt = task_prompt(task, task["role"] == "reviewer")
     with tempfile.TemporaryDirectory(prefix="orchestra-cli-") as temporary:
         if cfg["kind"] == "opencode":
-            major = int(match[1])
+            major = int(match[2])
             require(major in (1, 2), "지원하는 OpenCode 버전은 1.x와 2.x입니다.")
             local = route.model.get("cli_model", route.model["model"])
             isolated = {}
@@ -306,7 +308,23 @@ def attached(route, task, cwd, client, validated, emit, stop):
             argv = [cfg["executable"], "--ask-for-approval", "never", "exec", "--json", "--sandbox", "read-only",
                     "--model", route.model.get("cli_model", route.model["model"]), "-"]
             input_bytes = prompt.encode()
-        code, raw = run(argv, cwd=cwd, timeout=900, env=env, stop=stop, input_bytes=input_bytes)
+        seen_events = 0
+
+        def activity(line):
+            nonlocal seen_events
+            if len(line) > 100_000 or seen_events >= 250:
+                return
+            try:
+                record = json.loads(line)
+            except (ValueError, UnicodeError):
+                return
+            kind = record.get("type") if isinstance(record, dict) else None
+            if kind in ("session.created", "thread.started", "step_start", "step_finish", "tool_use",
+                        "turn.started", "turn.completed", "turn.failed", "item.started", "item.completed", "error"):
+                seen_events += 1
+                emit("process.activity", {"step": kind})
+
+        code, raw = run(argv, cwd=cwd, timeout=900, env=env, stop=stop, input_bytes=input_bytes, on_line=activity)
     require(code == 0, f"Attached CLI 실패 (종료 코드 {code}).")
     answer, usage = [], []
     for line in raw.splitlines():

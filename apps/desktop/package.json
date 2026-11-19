@@ -1,0 +1,31 @@
+{
+  "name": "@orchestration/desktop",
+  "productName": "Model Orchestration Preview",
+  "description": "Read-only dashboard for Model Orchestration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "build/main/electron/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.core.json && tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && vite build",
+    "dev": "npm run build && electron .",
+    "test": "node --test \"build/main/tests/*.test.js\"",
+    "test:e2e": "playwright test --workers=1",
+    "package:linux": "electron-builder --config packaging/electron-builder.json --linux AppImage --publish never",
+    "package:windows": "electron-builder --config packaging/electron-builder.json --win nsis --publish never",
+    "inspect": "node build/main/tools/inspect.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "45.4.1",
+    "electron-builder": "26.18.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.8"
+  },
+  "desktopName": "model-orchestration-preview.desktop"
+}

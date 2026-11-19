@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import signal
@@ -13,7 +12,10 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 from .core import Invalid, Stopped, Temporary, atomic_bytes, atomic_json, config_check, defaults, digest, path_in, plan_check, require, settings
+from .execution_state import BLOCKED, ready_tasks
 from .gitgate import GitGate
+from .platform.filesystem import repository_identity
+from .platform.process_control import process_backend, process_lock as process_lock
 from .harness import AwaitApproval, Managed, attached
 from .mcp import Gateway
 from .runtime import RuntimePool, routes
@@ -25,44 +27,19 @@ def read_config(root):
     return config_check(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else defaults()
 
 
-@contextlib.contextmanager
-def process_lock(path):
-    with path.open("a+b") as file:
-        if not file.tell():
-            file.write(b"\0")
-            file.flush()
-        file.seek(0)
-        try:
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            yield False
-            return
-        try:
-            yield True
-        finally:
-            if os.name == "nt":
-                file.seek(0)
-                msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(file.fileno(), fcntl.LOCK_UN)
-
-
 def ordered(tasks):
     remaining = {task["id"]: task for task in tasks}
     sequence = []
     ancestry = {}
     while remaining:
+        pending = len(remaining)
         for key, task in list(remaining.items()):
             deps = set(task.get("depends", []))
             if deps <= ancestry.keys():
                 sequence.append(key)
                 ancestry[key] = deps.union(*(ancestry[dep] for dep in deps))
                 del remaining[key]
+        require(len(remaining) < pending, "작업 그래프에 잘못된 선행 노드 또는 순환 관계가 있습니다.")
     return sequence, ancestry
 
 
@@ -119,6 +96,10 @@ class JobRunner:
                     raise Stopped("실행 준비 중 중지되었습니다.")
                 with self.pool.reserve(route, self.job["config"], self.stop) as client:
                     validated = client.probe(route, spec, emit) if client else None
+                    emit("route.selected", {"provider": route.model["provider"], "manual_model": bool(spec.get("model")),
+                                            "manual_harness": bool(spec.get("harness")),
+                                            "quality": route.model.get("quality", 0), "reliability": route.model.get("reliability", 0),
+                                            "tool_score": route.model.get("tool_score", 0), "cost": route.model.get("cost", 0)})
                     if checkpoint:
                         path = self.git.root / task_id
                         require(path.is_dir(), "체크포인트 Worktree를 찾을 수 없습니다.")
@@ -141,7 +122,9 @@ class JobRunner:
                         checkpoint.update(step="agent_done", answer=answer)
                         self.store.checkpoint(self.id, task_id, checkpoint, event_route)
                 if spec["role"] == "reviewer":
-                    require(answer.rstrip().splitlines()[-1].strip() == "REVIEW: PASS", "독립 Reviewer가 변경을 통과시키지 않았습니다.")
+                    passed = answer.rstrip().splitlines()[-1].strip() == "REVIEW: PASS"
+                    emit("review.result", {"status": "passed" if passed else "failed"})
+                    require(passed, "독립 Reviewer가 변경을 통과시키지 않았습니다.")
                 checkpoint = self.store.tasks(self.id)[task_id]["checkpoint"]
                 if checkpoint["step"] == "committed":
                     require(self.git.head(path) == (checkpoint["commit"] or checkpoint["initial_head"])
@@ -164,6 +147,8 @@ class JobRunner:
                         commit, changed = self.git.commit(path, task_id, checkpoint["initial_head"], spec.get("paths", []))
                     checkpoint.update(step="committed", commit=commit, changed=changed)
                     self.store.checkpoint(self.id, task_id, checkpoint, event_route)
+                if commit:
+                    emit("git.commit", {"commit": commit, "changed": changed})
                 self.store.set_task(self.id, task_id, "VERIFYING", route=event_route)
                 qa = self.git.qa(path, spec.get("qa", []), task_id, event_route)
                 artifact = self.store.root / "artifacts" / self.id / (task_id + ".txt")
@@ -208,7 +193,8 @@ class JobRunner:
         else:
             base = self.git.base()
             atomic_json(base_file, {"base": base})
-        self.store.set_job(self.id, "RUNNING", {"base": base}, release=False)
+        if not self.store.set_job(self.id, "RUNNING", {"base": base}, release=False):
+            raise Stopped("실행 전에 중지되었습니다.")
         active = {}
         with ThreadPoolExecutor(max_workers=self.conf["parallel_tasks"], thread_name_prefix="task") as workers:
             while not self.stop():
@@ -217,19 +203,11 @@ class JobRunner:
                     self.seen_action.set()
                     break
                 rows = self.store.tasks(self.id)
-                blocked = {key for key, row in rows.items() if row["state"] in ("AWAITING_TOOL", "FAILED")}
-                submitted = False
-                for key in sequence:
-                    if blocked or len(active) >= self.conf["parallel_tasks"]:
-                        break
-                    row = rows[key]
+                blocked = {key for key, row in rows.items() if row["state"] in BLOCKED}
+                for key in ready_tasks(sequence, ancestry, rows, active, time.time(), self.conf["parallel_tasks"]):
                     deps = ancestry[key]
-                    if (key in active or row["state"] not in ("QUEUED", "RETRY_WAIT") or row["available"] > time.time()
-                            or any(rows[dep]["state"] != "SUCCEEDED" for dep in deps)):
-                        continue
                     commits = [rows[dep]["result"]["commit"] for dep in sequence if dep in deps and rows[dep]["result"]["commit"]]
-                    active[key] = workers.submit(self.task, self.roles[key], base, commits, row)
-                    submitted = True
+                    active[key] = workers.submit(self.task, self.roles[key], base, commits, rows[key])
                 if active:
                     wait(active.values(), timeout=.2, return_when=FIRST_COMPLETED)
                     for key, future in list(active.items()):
@@ -237,7 +215,7 @@ class JobRunner:
                             del active[key]
                             future.result()
                     continue
-                if blocked and not submitted:
+                if blocked:
                     state = "FAILED" if any(rows[key]["state"] == "FAILED" for key in blocked) else "AWAITING_TOOL"
                     self.store.set_job(self.id, state)
                     return
@@ -253,11 +231,14 @@ class JobRunner:
             return
         require(time.monotonic() < self.deadline, "작업 실행 시간이 초과되었습니다.")
         rows = self.store.tasks(self.id)
-        self.store.set_job(self.id, "VERIFYING", release=False)
+        if not self.store.set_job(self.id, "VERIFYING", release=False):
+            raise Stopped("통합 QA 전에 중지되었습니다.")
         commits = [rows[key]["result"]["commit"] for key in sequence if rows[key]["result"]["commit"]]
         result = self.git.integrate(base, commits)
         if self.stop() or self.store.job(self.id)["action"] == "cancel":
             raise Stopped("통합 검증 후 중지되었습니다.")
+        if commits:
+            result["approval_revision"] = uuid.uuid4().hex
         self.store.set_job(self.id, "AWAITING_APPROVAL" if commits else "SUCCEEDED", result=result)
 
     def work(self):
@@ -351,7 +332,7 @@ class Supervisor:
                                 break
                             if self.store.claim(key, self.owner):
                                 row = self.store.job(key)
-                                repo = os.path.normcase(str(Path(row["plan"]["repo"]).resolve()))
+                                repo = repository_identity(row["plan"]["repo"])
                                 lock = self.merge_locks.setdefault(repo, threading.Lock())
                                 runner = JobRunner(self.store, self.pool, row, self.closed, lambda token: token in self.clients, lock)
                                 active[key] = (workers.submit(runner.work), row, now)
@@ -374,12 +355,9 @@ def start_supervisor(root):
     else:
         launcher = Path(__file__).resolve().parent.parent / "ModelOrchestration.pyw"
         argv = [sys.executable, str(launcher), "--supervisor"]
-    flags = 0
-    if os.name == "nt":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    subprocess.Popen(argv, cwd=root, env=os.environ | {"ORCHESTRA_DATA": str(root)}, stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
-                     start_new_session=os.name != "nt")
+    child = subprocess.Popen(argv, cwd=root, env=os.environ | {"ORCHESTRA_DATA": str(root)}, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **process_backend().detached_options())
+    threading.Thread(target=child.wait, name="supervisor-reaper", daemon=True).start()
 
 
 def run_supervisor(root):

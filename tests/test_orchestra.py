@@ -61,6 +61,9 @@ class Fixture(BaseHTTPRequestHandler):
             elif method == "tools/call":
                 if msg["params"]["name"] == "mutate":
                     self.server.writes += 1
+                    if self.server.drop_write_response:
+                        self.close_connection = True
+                        return
                 result = {"content": [{"type": "text", "text": "success"}]}
             else:
                 return self.send({}, 202)
@@ -75,6 +78,10 @@ class Fixture(BaseHTTPRequestHandler):
             self.server.released.wait(12)
         if "orchestra_probe" in names:
             name, args = "orchestra_probe", {}
+        elif "ui workflow" in context and "write_file" in names and messages[-1]["role"] != "tool":
+            self.server.stalled.set()
+            self.server.released.wait(12)
+            name, args = "write_file", {"path": "ui-result.txt", "content": "approved change\n"}
         elif "write a.txt" in context and messages[-1]["role"] != "tool":
             self.server.barrier.wait(timeout=15)
             name, args = "write_file", {"path": "a.txt", "content": "A\n"}
@@ -94,6 +101,8 @@ class Fixture(BaseHTTPRequestHandler):
                 text = "REVIEW: PASS" if outputs == [{"text": "A\n"}, {"text": "B\n"}] else "REVIEW: FAIL"
             if "try denied" in context:
                 text = "REVIEW: PASS" if "error" in json.loads(messages[-1]["content"]) else "REVIEW: FAIL"
+            if "ui workflow" in context and "write_file" not in names:
+                text = "REVIEW: PASS"
             return self.send({"model": "test-model", "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
                               "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25}})
         calls = [{"id": "call-" + str(len(messages)), "type": "function",
@@ -107,6 +116,7 @@ def http_fixture():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
     server.barrier = threading.Barrier(2)
     server.writes = 0
+    server.drop_write_response = False
     server.stalled = threading.Event()
     server.released = threading.Event()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -212,6 +222,31 @@ class OrchestrationTest(unittest.TestCase):
                 self.assertTrue(any(e["event_type"] == "qa.result" and e["payload"]["exit_code"] == 7
                                     for e in self.store.events(job)))
 
+    def test_stale_approval_and_moved_git_branch_cannot_integrate(self):
+        with http_fixture() as (fixture, url):
+            fixture.released.set()
+            cfg = config(url)
+            plan = self.plan([task("change", "ui workflow", "developer", paths=["ui-result.txt"])],
+                             [[sys.executable, "-c", "from pathlib import Path; assert Path('ui-result.txt').is_file()"]])
+            job = self.store.submit(plan_check(plan, cfg), cfg, None)
+            with self.daemon(cfg):
+                result = self.poll(job, {"AWAITING_APPROVAL"})["result"]
+                candidate = result["candidate"]
+                stale = "0" * 32
+                with self.assertRaises(Invalid):
+                    self.store.request(job, "merge", candidate, approval_revision=stale)
+                self.assertEqual(self.store.job(job)["state"], "AWAITING_APPROVAL")
+                git(self.repo, "commit", "--allow-empty", "-m", "advanced externally")
+                moved = git(self.repo, "rev-parse", "HEAD")
+                self.store.request(job, "merge", candidate, approval_revision=result["approval_revision"])
+                self.poll(job, {"FAILED"})
+                self.assertEqual(git(self.repo, "rev-parse", "HEAD"), moved)
+                self.assertFalse((self.repo / "ui-result.txt").exists())
+                self.assertTrue(any("대상 브랜치가 이동" in event["payload"].get("reason", "")
+                                    for event in self.store.events(job)))
+                with self.assertRaises(Invalid):
+                    self.store.request(job, "merge", candidate, approval_revision=result["approval_revision"])
+
     def test_runtime_gate_and_dag_scope(self):
         with http_fixture() as (_, url):
             cfg = config(url)
@@ -291,6 +326,26 @@ class OrchestrationTest(unittest.TestCase):
             self.store.decide(job, request["task"], request["key"], True)
             with self.daemon(cfg):
                 self.poll(job, {"SUCCEEDED"})
+            self.assertEqual(fixture.writes, 1)
+
+    def test_lost_mcp_response_after_effect_blocks_automatic_retry(self):
+        with http_fixture() as (fixture, url):
+            fixture.drop_write_response = True
+            cfg = config(url)
+            cfg["mcp"]["fixture"] = {"transport": "http", "url": url + "/mcp",
+                                      "tools": {"mutate": {"access": "write", "roles": ["developer"]}}}
+            plan = self.plan([task("write", "external write", "developer", tools=[virtual_name("fixture", "mutate")])])
+            job = self.store.submit(plan_check(plan, cfg), cfg, None)
+            with self.daemon(cfg):
+                self.poll(job, {"AWAITING_TOOL"})
+                [request] = self.store.approvals(job)
+                self.store.decide(job, request["task"], request["key"], True)
+                self.poll(job, {"FAILED"})
+            self.assertEqual(fixture.writes, 1)
+            with self.assertRaises(Invalid):
+                Store(self.root).request(job, "retry")
+            with self.daemon(cfg):
+                self.assertEqual(self.store.job(job)["state"], "FAILED")
             self.assertEqual(fixture.writes, 1)
 
     def test_attached_opencode_reuses_local_runtime_and_limits(self):

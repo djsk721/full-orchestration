@@ -8,8 +8,8 @@ Model Orchestration uses an existing Git repository as the Workspace. A job spec
 
 1. Prepare Windows 10/11, Git for Windows, and Python 3.11 or later with Tcl/Tk and the Python Launcher. Check your installation with `git --version` and `py -3 -m tkinter`.
 2. Run `Launch-Windows.cmd` from the repository. If the launcher is unavailable, open `ModelOrchestration.pyw` with `pythonw.exe` from the Python installation. For a Windows executable, see [Testing and builds](../developer-guide/testing.md).
-3. Open **모델 및 실행 설정 → JSON 가져오기** (Model and execution settings → Import JSON). Load the [Windows registry example](https://github.com/djsk721/full-orchestration/blob/develop/examples/registry.windows.json), set the absolute paths to your installed `llama-server.exe` and GGUF Model, and select **설정 저장** (Save settings). The example uses the CPU.
-4. In **새 작업** (New job), choose **기본 작업 불러오기** (Load default job), then **저장소 선택** (Choose repository). Choose the root of a Git repository with a committed local branch. In the JSON editor, set `target` to that branch and add `"model": "local-model"` and `"harness": "managed"` to the first node.
+3. Follow the [workspace guide](workspace.md) for guided setup. Use **Settings → Advanced JSON → Import JSON** for the examples below.
+4. In **새 작업 → 고급 JSON 편집** (New job → Advanced JSON), choose **기본 작업 불러오기** (Load default job), then **저장소 선택** (Choose repository). Choose the root of a Git repository with a committed local branch. In the JSON editor, set `target` to that branch and add `"model": "local-model"` and `"harness": "managed"` to the first node.
 5. Choose **작업 제출** (Submit job) and select the job in **작업 대시보드** (Job dashboard). Look for `runtime.snapshot` and the final state. Choose **결과 폴더 열기** (Open results folder) to read the Agent output.
 
 ## Example
@@ -36,4 +36,4 @@ To check the execution flow before installing a Model, replace the default job's
 
 ## Advanced settings
 
-Use **새 작업 → JSON 열기** (New job → Open JSON) to load the [Windows job example](https://github.com/djsk721/full-orchestration/blob/develop/examples/plan.windows.json) with Developer, Reviewer, and integration QA stages. Check the repository, branch, output file path, and `python.exe` command, then try it on a test branch.
+Use **새 작업 → 고급 JSON 편집 → JSON 열기** (New job → Open JSON) to load the [Windows job example](https://github.com/djsk721/full-orchestration/blob/develop/examples/plan.windows.json) with Developer, Reviewer, and integration QA stages. Check the repository, branch, output file path, and `python.exe` command, then try it on a test branch.
