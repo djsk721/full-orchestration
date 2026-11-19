@@ -3,3 +3,7 @@ __pycache__/
 build/
 dist/
 *.spec
+
+/.venv-docs/
+/site/
+/scripts/docs/node_modules/

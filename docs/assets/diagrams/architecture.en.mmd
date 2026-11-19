@@ -1,0 +1,11 @@
+flowchart LR
+    UI["Tkinter desktop"] <-->|"Jobs, approvals, events"| DB[("SQLite Store")]
+    DB <-->|"Queue and leases"| S["Supervisor"]
+    S --> DAG["DAG scheduler"]
+    DAG --> Git["Git Worktree"]
+    DAG --> Harness["Managed or Attached Harness"]
+    Harness --> Runtime["Loopback Model Runtime / external CLI"]
+    Harness --> MCP["Allowed MCP tools"]
+    Git --> QA["Integration QA"]
+    QA --> Approval["Candidate SHA approval"]
+    Approval --> Merge["Local fast-forward"]

@@ -1,0 +1,231 @@
+{
+  "providers": {
+    "status": "PARTIALLY_IMPLEMENTED",
+    "primary": "user-guide/providers.md",
+    "related": [
+      "admin-guide/configuration.md"
+    ],
+    "evidence": {
+      "orchestra/core.py": [
+        "config_check"
+      ],
+      "orchestra/runtime.py": [
+        "routes",
+        "RuntimeClient",
+        "auth_env"
+      ],
+      "orchestra/desktop.py": [
+        "save_registry"
+      ],
+      "orchestra/harness.py": [
+        "attached"
+      ]
+    },
+    "tests": {
+      "tests/test_orchestra.py": [
+        "test_runtime_gate_and_dag_scope",
+        "test_attached_opencode_reuses_local_runtime_and_limits"
+      ]
+    }
+  },
+  "mcp": {
+    "status": "PARTIALLY_IMPLEMENTED",
+    "primary": "user-guide/mcp.md",
+    "related": [
+      "admin-guide/operations.md",
+      "developer-guide/architecture.md"
+    ],
+    "evidence": {
+      "orchestra/discovery.py": [
+        "discover",
+        "migrate",
+        "rollback"
+      ],
+      "orchestra/mcp.py": [
+        "Gateway",
+        "MCPClient",
+        "published"
+      ],
+      "orchestra/desktop.py": [
+        "mcp_page"
+      ],
+      "orchestra/harness.py": [
+        "UncertainEffect"
+      ]
+    },
+    "tests": {
+      "tests/test_orchestra.py": [
+        "test_native_mcp_migration_and_rollback",
+        "test_external_write_waits_for_approval_and_reuses_checkpoint"
+      ]
+    }
+  },
+  "orchestration": {
+    "status": "IMPLEMENTED",
+    "primary": "user-guide/orchestration.md",
+    "related": [
+      "user-guide/getting-started.md",
+      "developer-guide/architecture.md"
+    ],
+    "evidence": {
+      "orchestra/core.py": [
+        "plan_check"
+      ],
+      "orchestra/supervisor.py": [
+        "ordered",
+        "JobRunner",
+        "REVIEW: PASS"
+      ],
+      "orchestra/desktop.py": [
+        "submit_page"
+      ]
+    },
+    "tests": {
+      "tests/test_orchestra.py": [
+        "test_parallel_dag_review_and_approved_merge",
+        "test_qa_node_executes_without_a_model"
+      ]
+    }
+  },
+  "git-gate": {
+    "status": "IMPLEMENTED",
+    "primary": "user-guide/orchestration.md",
+    "related": [
+      "developer-guide/architecture.md"
+    ],
+    "evidence": {
+      "orchestra/gitgate.py": [
+        "GitGate",
+        "apply",
+        "integrate",
+        "qa",
+        "update-ref"
+      ],
+      "orchestra/store.py": [
+        "request"
+      ]
+    },
+    "tests": {
+      "tests/test_orchestra.py": [
+        "test_parallel_dag_review_and_approved_merge",
+        "test_qa_failure_blocks_merge_and_duplicate_submit"
+      ]
+    }
+  },
+  "managed-harness": {
+    "status": "IMPLEMENTED",
+    "primary": "user-guide/managed-harness.md",
+    "related": [
+      "developer-guide/architecture.md",
+      "admin-guide/configuration.md"
+    ],
+    "evidence": {
+      "orchestra/harness.py": [
+        "Managed",
+        "execute_plan",
+        "compact"
+      ],
+      "orchestra/runtime.py": [
+        "probe"
+      ],
+      "orchestra/store.py": [
+        "checkpoint",
+        "call_start",
+        "call_end"
+      ]
+    },
+    "tests": {
+      "tests/test_orchestra.py": [
+        "test_runtime_gate_and_dag_scope",
+        "test_external_write_waits_for_approval_and_reuses_checkpoint",
+        "test_supervisor_crash_resumes_durable_checkpoint"
+      ]
+    }
+  },
+  "background": {
+    "status": "IMPLEMENTED",
+    "primary": "user-guide/background.md",
+    "related": [
+      "admin-guide/operations.md",
+      "developer-guide/architecture.md"
+    ],
+    "evidence": {
+      "orchestra/supervisor.py": [
+        "Supervisor",
+        "start_supervisor"
+      ],
+      "orchestra/store.py": [
+        "heartbeat",
+        "recover"
+      ],
+      "orchestra/core.py": [
+        "allow_background_write"
+      ],
+      "Register-SupervisorTask.ps1": [
+        "New-ScheduledTaskTrigger"
+      ]
+    },
+    "tests": {
+      "tests/test_orchestra.py": [
+        "test_expired_lease_recovers_and_unknown_effect_cannot_be_retried",
+        "test_supervisor_process_detach_and_reconnect"
+      ]
+    }
+  },
+  "remote": {
+    "status": "PLANNED",
+    "primary": "roadmap.md",
+    "related": [
+      "admin-guide/operations.md"
+    ],
+    "evidence": {},
+    "tests": {}
+  },
+  "desktop-localization": {
+    "status": "PLANNED",
+    "primary": "roadmap.md",
+    "related": [
+      "faq.md"
+    ],
+    "evidence": {
+      "orchestra/desktop.py": [
+        "STATES",
+        "layout"
+      ]
+    },
+    "tests": {}
+  },
+  "setup-ui": {
+    "status": "PLANNED",
+    "primary": "roadmap.md",
+    "related": [
+      "user-guide/getting-started.md"
+    ],
+    "evidence": {
+      "orchestra/desktop.py": [
+        "registry_page",
+        "submit_page"
+      ]
+    },
+    "tests": {}
+  },
+  "live-integration": {
+    "status": "NOT_VERIFIED",
+    "primary": "roadmap.md",
+    "related": [
+      "developer-guide/testing.md"
+    ],
+    "evidence": {
+      "Build-Windows.ps1": [
+        "PyInstaller"
+      ],
+      "orchestra/processes.py": [
+        "CreateJobObjectW"
+      ],
+      "orchestra/runtime.py": [
+        "gpu_layers"
+      ]
+    },
+    "tests": {}
+  }
+}

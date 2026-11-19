@@ -1,0 +1,12 @@
+globs:
+  - "README*.md"
+  - "CONTRIBUTING*.md"
+  - "CHANGELOG.md"
+  - "docs/**/*.md"
+  - ".github/pull_request_template.md"
+ignores:
+  - "docs/internal/legacy-readme.md"
+config:
+  MD013: false
+  MD033:
+    allowed_elements: [div, img]

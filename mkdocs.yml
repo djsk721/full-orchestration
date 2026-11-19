@@ -1,0 +1,110 @@
+site_name: Model Orchestration
+site_url: !ENV [DOCS_SITE_URL, ""]
+site_description: Windows용 Model Orchestration 사용 및 운영 문서
+repo_name: djsk721/full-orchestration
+repo_url: https://github.com/djsk721/full-orchestration
+strict: true
+
+exclude_docs: |
+  /internal/
+  /migration/
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+theme:
+  name: material
+  language: ko
+  logo: assets/images/mark.svg
+  favicon: assets/images/mark.svg
+  custom_dir: docs-theme
+  font: false
+  features:
+    - content.code.copy
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: 어두운 모드 / Dark mode
+    - scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: 밝은 모드 / Light mode
+
+markdown_extensions:
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower, percent_encode: false}}
+  - pymdownx.superfences
+
+plugins:
+  - i18n:
+      docs_structure: folder
+      reconfigure_search: false
+      languages:
+        - locale: ko
+          name: 한국어
+          default: true
+          build: true
+        - locale: en
+          name: English
+          build: true
+          site_description: User, administrator, and developer documentation for Model Orchestration
+          nav_translations:
+            홈: Home
+            사용자 가이드: User guide
+            시작하기: Getting started
+            Provider 및 Model: Providers and models
+            작업 실행: Running jobs
+            백그라운드 실행: Background Execution
+            관리자 가이드: Administrator guide
+            운영 환경: Operations
+            설정 및 API: Configuration and API
+            개발자 가이드: Developer guide
+            아키텍처: Architecture
+            테스트와 빌드: Testing and builds
+            문서 관리: Documentation maintenance
+            문제 해결: Troubleshooting
+            자주 묻는 질문: FAQ
+            로드맵: Roadmap
+  - search:
+      lang:
+        - en
+
+nav:
+  - 홈: index.md
+  - 사용자 가이드:
+      - 시작하기: user-guide/getting-started.md
+      - Provider 및 Model: user-guide/providers.md
+      - MCP: user-guide/mcp.md
+      - 작업 실행: user-guide/orchestration.md
+      - Managed Harness: user-guide/managed-harness.md
+      - 백그라운드 실행: user-guide/background.md
+  - 관리자 가이드:
+      - 운영 환경: admin-guide/operations.md
+      - 설정 및 API: admin-guide/configuration.md
+  - 개발자 가이드:
+      - 아키텍처: developer-guide/architecture.md
+      - 테스트와 빌드: developer-guide/testing.md
+      - 문서 관리: developer-guide/documentation.md
+  - 문제 해결: troubleshooting/index.md
+  - 자주 묻는 질문: faq.md
+  - 로드맵: roadmap.md

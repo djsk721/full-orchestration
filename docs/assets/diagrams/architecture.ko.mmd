@@ -1,0 +1,11 @@
+flowchart LR
+    UI["Tkinter Desktop"] <-->|"작업, 승인, 이벤트"| DB[("SQLite Store")]
+    DB <-->|"큐와 임대"| S["Supervisor"]
+    S --> DAG["DAG 스케줄러"]
+    DAG --> Git["Git Worktree"]
+    DAG --> Harness["Managed 또는 Attached Harness"]
+    Harness --> Runtime["loopback Model Runtime / 외부 CLI"]
+    Harness --> MCP["허용된 MCP 도구"]
+    Git --> QA["통합 QA"]
+    QA --> Approval["후보 SHA 승인"]
+    Approval --> Merge["로컬 fast-forward"]
