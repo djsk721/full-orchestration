@@ -142,8 +142,13 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         self.window.bind("<Control-t>", lambda _: self.action(self.local_project_shell))
         self.window.bind("<Control-p>", lambda _: self.workspace_find_file())
         self.window.bind("<Control-Tab>", lambda _: self.workspace_switch_tab(1) if self.view == "workspace" else None)
-        self.window.bind("<Control-ISO_Left_Tab>", lambda _: self.workspace_switch_tab(-1) if self.view == "workspace" else None)
-        self.window.bind("<Control-Shift-Tab>", lambda _: self.workspace_switch_tab(-1) if self.view == "workspace" else None)
+        def previous_tab(_):
+            if self.view == "workspace":
+                self.workspace_switch_tab(-1)
+
+        self.window.bind("<Control-Shift-Tab>", previous_tab)
+        if self.window.tk.call("tk", "windowingsystem") == "x11":
+            self.window.bind("<Control-ISO_Left_Tab>", previous_tab)
         self.action(self.refresh_sidebar)
         self.update_header_context()
 

@@ -361,7 +361,7 @@ class OrchestrationTest(unittest.TestCase):
                 atomic_json(target, {"x": "keep", "mcp": {"existing": {"type": "remote", "url": url + "/mcp", "oauth": False}}})
                 before = target.read_bytes()
                 records, _ = discover(self.repo)
-                record = next(item for item in records if item["path"] == str(target))
+                record = next(item for item in records if item["path"] == str(target.resolve()))
                 self.assertEqual(target.read_bytes(), before)
                 with self.assertRaises(Invalid):
                     migrate(self.root, cfg, record, "fixture", "mutate", {}, self.repo)

@@ -42,7 +42,7 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(project["branch"], "main")
         key = put_project(self.root, project | {"name": "Fixture"})
         workspace = json.loads((self.root / "workspace.json").read_bytes())
-        self.assertEqual(workspace["projects"][key]["path"], str(self.repo))
+        self.assertEqual(workspace["projects"][key]["path"], str(self.repo.resolve()))
         plan = draft_plan(project, "Run a check", STRATEGIES[2], qa=[[sys.executable, "-c", "raise SystemExit(0)"]])
         self.assertEqual(plan_routes(plan, defaults()), {"qa": []})
         with self.assertRaises(Invalid):
