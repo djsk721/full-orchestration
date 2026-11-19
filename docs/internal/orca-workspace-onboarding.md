@@ -1,0 +1,12 @@
+# First-run usability
+
+| Workflow | Baseline friction | Current behavior |
+| --- | --- | --- |
+| First launch and project registration | The empty workspace linked to a generic repository registration form. Git root discovery, project fields and terminal launch were separate. | The empty workspace offers a setup action. Selecting a nested folder resolves its Git root and current branch, and the branch is visible before saving. |
+| AI CLI and model | The user had to discover an executable and a registered model in separate screens. An absent CLI or model could block exploration. | Setup scans installed CLI paths and configured model profiles. The local shell and automatic model selection remain available. The Provider wizard is reachable from setup and retains Advanced mode. |
+| SSH | The user had to enter the SSH page, save a profile, independently verify a fingerprint, and then find the connection-test action. | Setup can register or reuse a host and exposes fingerprint verification and a safe connection test. SSH is optional. A saved host remains untrusted until its fingerprint is verified. |
+| Routine project work | The integrated workspace already supported split terminals, Files/Git, Agent activity and task review. Large admin toolbars and some English labels still hid available actions. | Setup hands off to the same workspace. Administrative toolbars wrap, while the existing task, Agent, QA and approval flows remain available. |
+
+The project is written only when the user chooses **Save project and open terminal**. Model selection sets the project default. The local Provider test reads the configured loopback runtime's model list. Selecting an installed CLI verifies its launch path and leaves CLI sign-in and hosted model availability to the CLI. Credentials, registered providers and model definitions stay in their original stores. Saving a new Provider through the existing wizard remains a separate explicit action.
+
+The native fixture selected a nested Git path, registered an optional SSH profile, read model metadata from a loopback endpoint, compared the Provider registry byte-for-byte, saved the project and opened a real PTY. Its CLI response was a fixture. [First launch](../assets/screenshots/orca-workspace/onboarding/first-run-1440x900.png) · [Setup form](../assets/screenshots/orca-workspace/onboarding/first-run-setup.png) · [First session](../assets/screenshots/orca-workspace/onboarding/first-run-terminal-1440x900.png)

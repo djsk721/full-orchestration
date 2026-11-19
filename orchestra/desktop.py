@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
@@ -30,6 +31,7 @@ from .ui import (
     t,
 )
 from .ui.strings import STATES_I18N
+from .ui.workspace_strings import WORKSPACE_EN, workspace_text
 
 _DEFAULT_PALETTE = THEMES["dark"]
 BG, PANEL = _DEFAULT_PALETTE["canvas"], _DEFAULT_PALETTE["panel"]
@@ -60,7 +62,7 @@ def sample_plan():
 class Desktop:
     initial_page = "jobs"
 
-    def __init__(self, window, root):
+    def __init__(self, window, root, *, startup_locale=None):
         self.window, self.root, self.store = window, root, Store(root)
         self.token = uuid.uuid4().hex
         self.selected_job = None
@@ -71,11 +73,13 @@ class Desktop:
         self.scanned = []
         self.scan_project = None
         self.results = queue.Queue()
+        self._tick_timer = None
         self.launch_attempt = 0.0
         self.events_cached = {}
         self.suppress_restart = False
         self.view = ""
-        self.locale = "ko"
+        locale = startup_locale or os.environ.get("ORCHESTRA_LANG", self._read_ui_prefs().get("locale"))
+        self.locale = locale if locale in ("ko", "en") else "ko"
         self.theme_name = self._load_theme_pref()
         self.palette = THEMES[self.theme_name]
         self.pages = {}
@@ -100,22 +104,39 @@ class Desktop:
     def _prefs_path(self) -> Path:
         return self.root / "ui_prefs.json"
 
-    def _load_theme_pref(self) -> str:
+    def _read_ui_prefs(self):
         try:
-            path = self._prefs_path()
-            if path.is_file():
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if data.get("theme") in THEMES:
-                    return data["theme"]
+            data = json.loads(self._prefs_path().read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
         except (OSError, ValueError, TypeError):
             pass
-        return "dark"
+        return {}
+
+    def _load_theme_pref(self) -> str:
+        theme = self._read_ui_prefs().get("theme")
+        return theme if isinstance(theme, str) and theme in THEMES else "dark"
+
+    def save_ui_prefs(self, **values):
+        atomic_json(self._prefs_path(), self._read_ui_prefs() | values)
+
+    def w(self, message, *values):
+        return workspace_text(self.locale, message, *values)
+
+    def workspace_error(self, error):
+        message = str(error)[:500]
+        if message.startswith("Worker 프로토콜 ") and " · PC 프로토콜 " in message:
+            remote, client = message.removeprefix("Worker 프로토콜 ").split(" · PC 프로토콜 ", 1)
+            return self.w("Worker 프로토콜 {0} · PC 프로토콜 {1}", remote, client)
+        if self.locale == "en" and message not in WORKSPACE_EN and any("가" <= ch <= "힣" for ch in message):
+            return self.w("요청을 처리할 수 없습니다. 입력과 실행 환경을 확인하세요.")
+        return self.w(message)
 
     def toggle_theme(self):
         self.theme_name = "light" if self.theme_name == "dark" else "dark"
         self.palette = THEMES[self.theme_name]
         try:
-            atomic_json(self._prefs_path(), {"theme": self.theme_name})
+            self.save_ui_prefs(theme=self.theme_name)
         except OSError:
             pass
         self.style()
@@ -287,10 +308,11 @@ class Desktop:
         self.theme_btn = ttk.Button(self.header_right, text=theme_label, style="Subtle.TButton", command=self.toggle_theme)
         self.theme_btn.pack(side="left", padx=(0, 6))
 
-        ttk.Button(
+        self.header_new_task = ttk.Button(
             self.header_right, text=t("header.new_task", self.locale),
             style="Primary.TButton", command=lambda: self.show("submit"),
-        ).pack(side="left")
+        )
+        self.header_new_task.pack(side="left")
 
         self.host = ttk.Frame(self.main_shell, padding=(22, 16, 22, 18))
         self.host.grid(row=1, column=0, sticky="nsew")
@@ -350,7 +372,9 @@ class Desktop:
         frame = ttk.Frame(self.host)
         frame.columnconfigure(0, weight=1)
         ttk.Label(frame, text=title, style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(frame, text=description, style="Subheading.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 12))
+        caption = ttk.Label(frame, text=description, style="Subheading.TLabel", justify="left")
+        caption.grid(row=1, column=0, sticky="ew", pady=(3, 12))
+        frame.bind("<Configure>", lambda event: caption.configure(wraplength=max(200, event.width - 8)), add="+")
         return frame
 
     @staticmethod
@@ -359,6 +383,31 @@ class Desktop:
         button = ttk.Button(parent, text=text, command=command, style=style_name)
         button.pack(side=side, padx=(0, 6), pady=3)
         return button
+
+    @staticmethod
+    def wrap_controls(bar):
+        widgets = bar.pack_slaves()
+        prior_height = None
+        for widget in widgets:
+            widget.pack_forget()
+
+        def layout(width):
+            nonlocal prior_height
+            x = y = row_height = 0
+            for widget in widgets:
+                required = widget.winfo_reqwidth()
+                if x and x + required > width:
+                    x, y, row_height = 0, y + row_height, 0
+                widget.place(x=x, y=y + 3)
+                x += required + 6
+                row_height = max(row_height, widget.winfo_reqheight() + 6)
+            height = y + row_height
+            if prior_height != height:
+                bar.configure(height=height)
+                prior_height = height
+
+        layout(max(420, bar.winfo_width()))
+        bar.bind("<Configure>", lambda event: layout(event.width), add="+")
 
     def text(self, parent, row, *, size=10, height=None):
         host = ttk.Frame(parent)
@@ -374,6 +423,8 @@ class Desktop:
         field = tk.Text(host, **kwargs)
         style_text_widget(field, self.palette, self.mono_font, size)
         self._text_widgets.append(field)
+        field.bind("<Destroy>", lambda _: self._text_widgets.remove(field) if field in self._text_widgets else None,
+                   add="+")
         scroll = ttk.Scrollbar(host, orient="vertical", command=field.yview)
         field.configure(yscrollcommand=scroll.set)
         field.grid(row=0, column=0, sticky="nsew")
@@ -405,58 +456,58 @@ class Desktop:
         return table
 
     def jobs_page(self):
-        frame = self.base("작업 대시보드", "실행 경로와 작업 상태를 확인하고, 검증된 변경의 병합을 승인합니다.")
+        frame = self.base(self.w("작업 대시보드"), self.w("실행 경로와 작업 상태를 확인하고, 검증된 변경의 병합을 승인합니다."))
         frame.rowconfigure(3, weight=2)
         frame.rowconfigure(7, weight=3)
         toolbar = ttk.Frame(frame)
         toolbar.grid(row=2, column=0, sticky="ew")
-        self.button(toolbar, "새 작업", lambda: self.show("submit"), True)
-        self.button(toolbar, "중지", lambda: self.job_action("cancel"))
-        self.button(toolbar, "재시도", lambda: self.job_action("retry"))
-        self.button(toolbar, "도구 승인 검토", self.tool_decision)
-        self.button(toolbar, "병합 승인", lambda: self.job_action("merge"))
+        self.button(toolbar, self.w("새 작업"), lambda: self.show("submit"), True)
+        self.button(toolbar, self.w("중지"), lambda: self.job_action("cancel"))
+        self.button(toolbar, self.w("재시도"), lambda: self.job_action("retry"))
+        self.button(toolbar, self.w("도구 승인 검토"), self.tool_decision)
+        self.button(toolbar, self.w("병합 승인"), lambda: self.job_action("merge"))
         self.jobs = self.table(frame, 3, (
-            ("title", "작업", 295), ("state", "상태", 135),
-            ("mode", "실행 모드", 100), ("updated", "갱신", 140),
+            ("title", self.w("작업"), 295), ("state", self.w("상태"), 135),
+            ("mode", self.w("실행 모드"), 100), ("updated", self.w("갱신"), 140),
         ))
         self.jobs.bind("<<TreeviewSelect>>", self.job_selected)
         toolbar2 = ttk.Frame(frame)
         toolbar2.grid(row=4, column=0, sticky="ew")
-        self.button(toolbar2, "JSON 보고서 저장", self.export_report)
-        self.button(toolbar2, "결과 폴더 열기", self.open_artifacts)
-        self.button(toolbar2, "Supervisor 종료", self.stop_supervisor, side="right")
-        self.button(toolbar2, "Supervisor 시작", self.restart_supervisor, side="right")
-        self.detail_title = ttk.Label(frame, text="작업 상세", style="Section.TLabel")
+        self.button(toolbar2, self.w("JSON 보고서 저장"), self.export_report)
+        self.button(toolbar2, self.w("결과 폴더 열기"), self.open_artifacts)
+        self.button(toolbar2, self.w("Supervisor 종료"), self.stop_supervisor, side="right")
+        self.button(toolbar2, self.w("Supervisor 시작"), self.restart_supervisor, side="right")
+        self.detail_title = ttk.Label(frame, text=self.w("작업 상세"), style="Section.TLabel")
         self.detail_title.grid(row=5, column=0, sticky="w", pady=(9, 2))
         self.detail_evidence = ttk.Label(frame, style="Muted.TLabel", wraplength=620, justify="left")
         self.detail_evidence.grid(row=6, column=0, sticky="nw", pady=(2, 2))
         self.detail = self.text(frame, 7)
-        self.write(self.detail, "작업을 선택하면 상태와 실행 이벤트가 표시됩니다.", True)
+        self.write(self.detail, self.w("작업을 선택하면 상태와 실행 이벤트가 표시됩니다."), True)
         return frame
 
     def submit_page(self):
-        frame = self.base("고급 JSON 작업 편집", "저장소, 대상 브랜치, DAG 노드, 허용 경로, QA 명령을 JSON으로 직접 편집합니다.")
+        frame = self.base(self.w("고급 JSON 작업 편집"), self.w("저장소, 대상 브랜치, DAG 노드, 허용 경로, QA 명령을 JSON으로 직접 편집합니다."))
         frame.rowconfigure(3, weight=1)
         toolbar = ttk.Frame(frame)
         toolbar.grid(row=2, column=0, sticky="ew")
-        self.button(toolbar, "작업 제출", self.submit, True)
-        self.button(toolbar, "저장소 선택", self.pick_repo)
-        self.button(toolbar, "JSON 열기", lambda: self.import_file(self.plan))
-        self.button(toolbar, "기본 작업 불러오기", lambda: self.write(self.plan, formatted(sample_plan())))
+        self.button(toolbar, self.w("작업 제출"), self.submit, True)
+        self.button(toolbar, self.w("저장소 선택"), self.pick_repo)
+        self.button(toolbar, self.w("JSON 열기"), lambda: self.import_file(self.plan))
+        self.button(toolbar, self.w("기본 작업 불러오기"), lambda: self.write(self.plan, formatted(sample_plan())))
         if "submit" in self.pages:
-            self.button(toolbar, "마법사로 돌아가기", lambda: self.show("submit"), side="right")
+            self.button(toolbar, self.w("마법사로 돌아가기"), lambda: self.show("submit"), side="right")
         self.plan = self.text(frame, 3)
         self.write(self.plan, formatted(sample_plan()))
         return frame
 
     def registry_page(self):
-        frame = self.base("모델 및 실행 설정", "Provider, Model, Runtime, Harness, MCP를 각각 등록합니다.")
+        frame = self.base(self.w("모델 및 실행 설정"), self.w("Provider, Model, Runtime, Harness, MCP를 각각 등록합니다."))
         frame.rowconfigure(3, weight=1)
         toolbar = ttk.Frame(frame)
         toolbar.grid(row=2, column=0, sticky="ew")
-        self.button(toolbar, "설정 저장", self.save_registry, True)
-        self.button(toolbar, "저장된 설정 열기", lambda: self.write(self.registry, formatted(read_config(self.root))))
-        self.button(toolbar, "JSON 가져오기", lambda: self.import_file(self.registry))
+        self.button(toolbar, self.w("설정 저장"), self.save_registry, True)
+        self.button(toolbar, self.w("저장된 설정 열기"), lambda: self.write(self.registry, formatted(read_config(self.root))))
+        self.button(toolbar, self.w("JSON 가져오기"), lambda: self.import_file(self.registry))
         self.registry = self.text(frame, 3)
         return frame
 
@@ -466,27 +517,28 @@ class Desktop:
         frame.rowconfigure(5, weight=1)
         bar = ttk.Frame(frame)
         bar.grid(row=2, column=0, sticky="ew", pady=(0, 4))
-        self.button(bar, "사용자 설정 탐색", lambda: self.scan(None), True)
-        self.button(bar, "프로젝트 탐색", self.scan_project_folder)
-        self.button(bar, "Gateway 전환", self.migrate_binding)
-        self.button(bar, "롤백", self.rollback_binding)
-        self.button(bar, "Gateway 감사", self.gateway_audit)
+        self.button(bar, self.w("사용자 설정 탐색"), lambda: self.scan(None), True)
+        self.button(bar, self.w("프로젝트 탐색"), self.scan_project_folder)
+        self.button(bar, self.w("Gateway 전환"), self.migrate_binding)
+        self.button(bar, self.w("롤백"), self.rollback_binding)
+        self.button(bar, self.w("Gateway 감사"), self.gateway_audit)
+        self.wrap_controls(bar)
         self.connections = self.table(frame, 3, (
-            ("name", "서버", 200), ("client", "CLI", 95),
-            ("scope", "범위", 85), ("mode", "모드", 105),
-            ("transport", "Transport", 105), ("duplicate", "충돌 후보", 95),
+            ("name", self.w("서버"), 200), ("client", "CLI", 95),
+            ("scope", self.w("범위"), 85), ("mode", self.w("모드"), 105),
+            ("transport", "Transport", 105), ("duplicate", self.w("충돌 후보"), 95),
         ))
         self.connections.bind("<<TreeviewSelect>>", self.binding_selected)
-        ttk.Label(frame, text="연결 상세", style="Section.TLabel").grid(row=4, column=0, sticky="w", pady=(8, 2))
+        ttk.Label(frame, text=self.w("연결 상세"), style="Section.TLabel").grid(row=4, column=0, sticky="w", pady=(8, 2))
         self.binding = self.text(frame, 5)
-        self.write(self.binding, "사용자 또는 프로젝트 MCP 설정 탐색을 실행하면 연결 목록과 정책 상태가 표시됩니다.", True)
+        self.write(self.binding, self.w("사용자 또는 프로젝트 MCP 설정 탐색을 실행하면 연결 목록과 정책 상태가 표시됩니다."), True)
         return frame
 
     def action(self, body):
         try:
             return body()
         except (ValueError, OSError, RuntimeError, TypeError) as error:
-            messagebox.showerror("Model Orchestration", str(error), parent=self.window)
+            messagebox.showerror("Model Orchestration", self.workspace_error(error), parent=self.window)
 
     def background(self, body, done):
         def work():
@@ -628,18 +680,19 @@ class Desktop:
             self.refresh_jobs()
 
     def get_job(self):
-        require(self.selected_job, "작업을 먼저 선택하세요.")
+        require(self.selected_job, self.w("작업을 먼저 선택하세요."))
         job = self.store.job(self.selected_job)
-        require(job, "작업을 찾을 수 없습니다.")
+        require(job, self.w("작업을 찾을 수 없습니다."))
         return job
 
-    def job_action(self, action):
+    def job_action(self, action, *, job_id=None):
         def apply():
-            job = self.get_job()
+            job = self.store.job(job_id) if job_id else self.get_job()
+            require(job, self.w("작업을 찾을 수 없습니다."))
             candidate = None
             if action == "merge":
                 job, tasks, events = self.store.status_snapshot(job["id"], 0, 0)
-                require(merge_candidate_ready(job), "통합 QA를 통과한 후보가 필요합니다.")
+                require(merge_candidate_ready(job), self.w("통합 QA를 통과한 후보가 필요합니다."))
                 candidate = job["result"]["candidate"]
                 decision = self.review_merge(job, tasks, events)
                 if decision == "reject":
@@ -648,7 +701,7 @@ class Desktop:
                     return
                 if not decision:
                     return
-            if action == "cancel" and not messagebox.askyesno("작업 중지", "선택한 작업을 중지하시겠습니까?", parent=self.window):
+            if action == "cancel" and not messagebox.askyesno(self.w("작업 중지"), self.w("선택한 작업을 중지하시겠습니까?"), parent=self.window):
                 return
             self.store.request(job["id"], action, candidate,
                                approval_revision=(job["result"] or {}).get("approval_revision") if candidate else None)
@@ -667,7 +720,7 @@ class Desktop:
         integration = self.root / "worktrees" / job["id"] / "_integration"
         cwd = integration if integration.is_dir() else (Path(repo_path) if repo_path and Path(repo_path).is_dir() else None)
         if not cwd or not candidate or not base:
-            return "통합 Worktree 또는 기준 SHA를 찾을 수 없어 변경 파일 목록만 표시합니다."
+            return self.w("통합 Worktree 또는 기준 SHA를 찾을 수 없어 변경 파일 목록만 표시합니다.")
         code, stat_out = run_process(
             ["git", "-c", "core.fsmonitor=false", "-C", str(cwd), "diff", "--stat", "--no-ext-diff", base, candidate],
             env=env_for_process(), timeout=8, limit=200000,
@@ -681,31 +734,31 @@ class Desktop:
             parts.append(stat_out.decode("utf-8", errors="replace").strip())
         if code2 == 0 and diff_out:
             parts.append(diff_out.decode("utf-8", errors="replace").strip())
-        return "\n\n".join(parts) or "표시할 diff 내용이 없습니다."
+        return "\n\n".join(parts) or self.w("표시할 diff 내용이 없습니다.")
 
     def show_diff_dialog(self, job, parent=None):
         p = self.palette
         win = tk.Toplevel(parent or self.window)
-        win.title("변경 사항 보기")
+        win.title(self.w("변경 사항 보기"))
         win.geometry("760x520")
         win.configure(bg=p["canvas"])
         win.transient(parent or self.window)
         win.columnconfigure(0, weight=1)
         win.rowconfigure(1, weight=1)
-        ttk.Label(win, text=f'{job["plan"]["title"]} · 변경 Diff', style="Section.TLabel").grid(row=0, column=0, sticky="w", padx=14, pady=(12, 6))
+        ttk.Label(win, text=self.w("{0} · 변경 Diff", job['plan']['title']), style="Section.TLabel").grid(row=0, column=0, sticky="w", padx=14, pady=(12, 6))
         box = self.text(win, 1)
         box.master.grid(padx=14, pady=(0, 8))
-        self.write(box, "diff를 불러오는 중…", True)
+        self.write(box, self.w("diff를 불러오는 중…"), True)
         bar = ttk.Frame(win, padding=(14, 6))
         bar.grid(row=2, column=0, sticky="ew")
-        self.button(bar, "닫기", win.destroy, side="right")
+        self.button(bar, self.w("닫기"), win.destroy, side="right")
         self.background(lambda: self.diff_summary_for_job(job), lambda text: self.write(box, text, True) if win.winfo_exists() else None)
 
     def review_merge(self, job, tasks, events=None):
         p = self.palette
         result = job["result"]
         dialog = tk.Toplevel(self.window)
-        dialog.title("Git 병합 승인")
+        dialog.title(self.w("Git 병합 승인"))
         dialog.geometry("800x560")
         dialog.configure(bg=p["canvas"])
         dialog.transient(self.window)
@@ -717,14 +770,14 @@ class Desktop:
         header.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 8))
         top_row = tk.Frame(header.body, bg=p["panel"])
         top_row.pack(fill="x")
-        StatusBadge(top_row, p, text=state_txt, tone=tone, ui_font=self.ui_font).pack(side="right", padx=(10, 0))
+        StatusBadge(top_row, p, text=self.w(state_txt), tone=tone, ui_font=self.ui_font).pack(side="right", padx=(10, 0))
         tk.Label(
             top_row, text=job["plan"]["title"], bg=p["panel"], fg=p["text"],
             font=(self.ui_font, 12, "bold"), wraplength=540, justify="left", anchor="w",
         ).pack(side="left", fill="x", expand=True)
         tk.Label(
             header.body,
-            text=f'저장소 {job["plan"].get("repo", "—")}  ·  대상 브랜치 {job["plan"]["target"]}  ·  후보 {result["candidate"][:12]}',
+            text=self.w("저장소 {0}  ·  대상 브랜치 {1}  ·  후보 {2}", job['plan'].get('repo', '—'), job['plan']['target'], result['candidate'][:12]),
             bg=p["panel"], fg=p["muted"], font=(self.ui_font, 9), anchor="w",
         ).pack(fill="x", pady=(4, 0))
 
@@ -732,16 +785,16 @@ class Desktop:
         passed_cnt = sum(1 for c in qa_checks if c.get("exit_code") == 0)
         failed_cnt = len(qa_checks) - passed_cnt
         review_events = [e for e in (events or []) if e.get("event_type") == "review.result"]
-        review_status = review_events[-1]["payload"].get("status", "미기록") if review_events else "해당 없음"
+        review_status = review_events[-1]["payload"].get("status", self.w("미기록")) if review_events else self.w("해당 없음")
 
         kpi = ttk.Frame(dialog)
         kpi.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 8))
         files = result["changed"] if "changed" in result else changed_files(tasks)
         for idx, (lbl, val) in enumerate((
-            ("통합 QA 통과", f"{passed_cnt}건"),
-            ("통합 QA 실패", f"{failed_cnt}건"),
-            ("독립 검토", str(review_status)),
-            ("변경 파일", f"{len(files)}개"),
+            (self.w("통합 QA 통과"), self.w("{0}건", passed_cnt)),
+            (self.w("통합 QA 실패"), self.w("{0}건", failed_cnt)),
+            (self.w("독립 검토"), str(review_status)),
+            (self.w("변경 파일"), self.w("{0}개", len(files))),
         )):
             kpi.columnconfigure(idx, weight=1, uniform="merge_kpi")
             c = Card(kpi, p, padding=(10, 8))
@@ -751,20 +804,20 @@ class Desktop:
 
         notes = self.text(dialog, 2)
         notes.master.grid(padx=14, pady=(0, 6))
-        revision = result.get("approval_revision") or "이전 실행 기록 (회차 ID 없음)"
-        checks = [f'{index}. 통과 (종료 코드 {check["exit_code"]})' if check.get("exit_code") == 0
-                  else f'{index}. 실패 (종료 코드 {check.get("exit_code")})'
+        revision = result.get("approval_revision") or self.w("이전 실행 기록 (회차 ID 없음)")
+        checks = [self.w("{0}. 통과 (종료 코드 {1})", index, check['exit_code']) if check.get("exit_code") == 0
+                  else self.w("{0}. 실패 (종료 코드 {1})", index, check.get('exit_code'))
                   for index, check in enumerate(qa_checks, 1)]
         lines = [
-            "병합 신청 가능 · 실행 시 후보와 대상 브랜치를 다시 검증합니다.",
-            f'대상 브랜치  {job["plan"]["target"]}',
-            f'후보 SHA  {result["candidate"]}',
-            f"QA 검증 회차  {revision}",
+            self.w("병합 신청 가능 · 실행 시 후보와 대상 브랜치를 다시 검증합니다."),
+            self.w("대상 브랜치  {0}", job['plan']['target']),
+            self.w("후보 SHA  {0}", result['candidate']),
+            self.w("QA 검증 회차  {0}", revision),
             "",
-            "현재 통합 QA",
+            self.w("현재 통합 QA"),
             *checks,
             "",
-            "변경 파일",
+            self.w("변경 파일"),
             *[json.dumps(name, ensure_ascii=False) for name in files],
         ]
         self.write(notes, "\n".join(lines), True)
@@ -780,16 +833,16 @@ class Desktop:
 
         def reject():
             nonlocal decision
-            if messagebox.askyesno("병합 거절", "이 후보의 병합 승인을 거절하고 작업을 중지하시겠습니까?", parent=dialog):
+            if messagebox.askyesno(self.w("병합 거절"), self.w("이 후보의 병합 승인을 거절하고 작업을 중지하시겠습니까?"), parent=dialog):
                 decision = "reject"
                 dialog.destroy()
 
-        approve_btn = self.button(buttons, "이 후보 승인", approve, True)
+        approve_btn = self.button(buttons, self.w("이 후보 승인"), approve, True)
         if not eligible:
             approve_btn.state(["disabled"])
-        self.button(buttons, "거절", reject, danger=True)
-        self.button(buttons, "변경 사항 보기", lambda: self.show_diff_dialog(job, dialog))
-        dismiss = self.button(buttons, "닫기", dialog.destroy, side="right")
+        self.button(buttons, self.w("거절"), reject, danger=True)
+        self.button(buttons, self.w("변경 사항 보기"), lambda: self.show_diff_dialog(job, dialog))
+        dismiss = self.button(buttons, self.w("닫기"), dialog.destroy, side="right")
         dialog.bind("<Escape>", lambda _: dialog.destroy())
         dialog.grab_set()
         dismiss.focus_set()
@@ -799,11 +852,11 @@ class Desktop:
     def tool_decision(self):
         def review():
             job = self.get_job()
-            require(job["state"] == "AWAITING_TOOL", "도구 승인을 대기 중인 작업을 선택하세요.")
+            require(job["state"] == "AWAITING_TOOL", self.w("도구 승인을 대기 중인 작업을 선택하세요."))
             pending = self.store.approvals(job["id"])
             for item in pending:
                 dialog = tk.Toplevel(self.window)
-                dialog.title("외부 도구 쓰기 승인")
+                dialog.title(self.w("외부 도구 쓰기 승인"))
                 dialog.geometry("680x420")
                 dialog.configure(bg=self.palette["canvas"])
                 dialog.transient(self.window)
@@ -826,9 +879,9 @@ class Desktop:
                         dialog.destroy()
                     self.action(change)
 
-                self.button(bar, "이 호출 승인", lambda: finish(True), True)
-                self.button(bar, "거절", lambda: finish(False), danger=True)
-                self.button(bar, "나중에", dialog.destroy, side="right")
+                self.button(bar, self.w("이 호출 승인"), lambda: finish(True), True)
+                self.button(bar, self.w("거절"), lambda: finish(False), danger=True)
+                self.button(bar, self.w("나중에"), dialog.destroy, side="right")
                 self.window.wait_window(dialog)
                 break
         self.action(review)
@@ -846,12 +899,12 @@ class Desktop:
         def open_result():
             job = self.get_job()
             path = self.root / "artifacts" / job["id"]
-            require(path.is_dir(), "저장된 작업 결과가 없습니다.")
+            require(path.is_dir(), self.w("저장된 작업 결과가 없습니다."))
             open_directory(path)
         self.action(open_result)
 
     def scan_project_folder(self):
-        folder = filedialog.askdirectory(parent=self.window, title="프로젝트 폴더 선택")
+        folder = filedialog.askdirectory(parent=self.window, title=self.w("프로젝트 폴더 선택"))
         if folder:
             self.scan(folder)
 
@@ -876,7 +929,7 @@ class Desktop:
                     item["name"], item["client"], item["scope"],
                     mode, item["transport"], item["alternatives"] + item["duplicates"],
                 ))
-            self.write(self.binding, f"발견된 연결 {len(records)}개\n" + (formatted(failures) if failures else ""), True)
+            self.write(self.binding, self.w("발견된 연결 {0}개\n", len(records)) + (formatted(failures) if failures else ""), True)
         self.background(lambda: discover(folder), done)
 
     def binding_selected(self, *_):
@@ -887,40 +940,40 @@ class Desktop:
     def migrate_binding(self):
         def request():
             selected = self.connections.selection()
-            require(selected, "전환할 연결을 선택하세요.")
+            require(selected, self.w("전환할 연결을 선택하세요."))
             record = self.scanned[int(selected[0])]
             cfg = read_config(self.root)
-            profile = simpledialog.askstring("Gateway 프로파일", "등록된 MCP 프로파일 ID", parent=self.window)
+            profile = simpledialog.askstring(self.w("Gateway 프로파일"), self.w("등록된 MCP 프로파일 ID"), parent=self.window)
             if not profile:
                 return
-            tool = simpledialog.askstring("읽기 전용 Probe", "등록된 원본 읽기 도구 이름", parent=self.window)
+            tool = simpledialog.askstring(self.w("읽기 전용 Probe"), self.w("등록된 원본 읽기 도구 이름"), parent=self.window)
             if not tool:
                 return
-            entered = simpledialog.askstring("Probe 인자", "JSON 객체", initialvalue="{}", parent=self.window)
+            entered = simpledialog.askstring(self.w("Probe 인자"), self.w("JSON 객체"), initialvalue="{}", parent=self.window)
             if entered is None:
                 return
             args = json.loads(entered)
-            if not messagebox.askyesno("MCP 전환 승인", f'{record["path"]}\n\n{record["name"]} 연결을 Gateway로 전환하시겠습니까?', parent=self.window):
+            if not messagebox.askyesno(self.w("MCP 전환 승인"), self.w("{0}\n\n{1} 연결을 Gateway로 전환하시겠습니까?", record['path'], record['name']), parent=self.window):
                 return
             folder = self.scan_project
 
             def done(key):
-                messagebox.showinfo("Gateway 전환 완료", "롤백 ID\n" + key, parent=self.window)
+                messagebox.showinfo(self.w("Gateway 전환 완료"), self.w("롤백 ID\n") + key, parent=self.window)
                 self.scan(folder)
 
             self.background(lambda: migrate(self.root, cfg, record, profile, tool, args, folder), done)
         self.action(request)
 
     def rollback_binding(self):
-        key = simpledialog.askstring("MCP 롤백", "전환 기록의 롤백 ID", parent=self.window)
-        if key and messagebox.askyesno("MCP 롤백 승인", "이 전환의 원본 설정을 다시 적용하시겠습니까?", parent=self.window):
+        key = simpledialog.askstring(self.w("MCP 롤백"), self.w("전환 기록의 롤백 ID"), parent=self.window)
+        if key and messagebox.askyesno(self.w("MCP 롤백 승인"), self.w("이 전환의 원본 설정을 다시 적용하시겠습니까?"), parent=self.window):
             def perform():
                 rollback(self.root, key)
                 self.scan(self.scan_project)
             self.action(perform)
 
     def gateway_audit(self):
-        profile = simpledialog.askstring("Gateway 감사", "등록된 MCP 프로파일 ID", parent=self.window)
+        profile = simpledialog.askstring(self.w("Gateway 감사"), self.w("등록된 MCP 프로파일 ID"), parent=self.window)
         if profile:
             self.write(self.binding, formatted(self.store.events("gateway:" + profile)), True)
 
@@ -940,12 +993,12 @@ class Desktop:
             status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.is_file() else {}
             active = time.time() - status.get("at", 0) < 5
             if active:
-                suffix = " · Gateway 연결됨" if status.get("gateway") else ""
+                suffix = self.w(" · Gateway 연결됨") if status.get("gateway") else ""
                 if status.get("gateway_error"):
-                    suffix = "\n" + status["gateway_error"]
+                    suffix = "\n" + self.workspace_error(status["gateway_error"])
                 self.status.configure(text=t("header.supervisor_running", self.locale) + suffix)
                 if hasattr(self, "header_supervisor_badge"):
-                    self.header_supervisor_badge.set_status("● Supervisor 실행 중", tone="success", palette=self.palette)
+                    self.header_supervisor_badge.set_status(f"● {t('header.supervisor_running', self.locale)}", tone="success", palette=self.palette)
             else:
                 note = t("header.supervisor_stopped", self.locale) if self.suppress_restart else t("header.supervisor_connecting", self.locale)
                 self.status.configure(text=note)
@@ -961,15 +1014,18 @@ class Desktop:
             while not self.results.empty():
                 callback, result, error = self.results.get_nowait()
                 if error:
-                    messagebox.showerror("Model Orchestration", str(error), parent=self.window)
+                    messagebox.showerror("Model Orchestration", self.workspace_error(error), parent=self.window)
                 else:
                     callback(result)
         except (OSError, ValueError):
-            self.status.configure(text="Supervisor 상태 갱신 중")
+            self.status.configure(text=self.w("Supervisor 상태 갱신 중"))
         finally:
-            self.window.after(900, self.tick)
+            self._tick_timer = self.window.after(900, self.tick)
 
     def close(self):
+        if self._tick_timer is not None:
+            self.window.after_cancel(self._tick_timer)
+            self._tick_timer = None
         self.store.presence(self.token, active=False)
         self.window.destroy()
 
@@ -978,6 +1034,10 @@ def launch(root):
     prepare_dpi()
     window = tk.Tk()
     from .workspace_desktop import WorkspaceDesktop
+    from .workspace_onboarding import select_startup_language
 
-    WorkspaceDesktop(window, root)
+    locale = select_startup_language(window, root)
+    WorkspaceDesktop(window, root, startup_locale=locale)
+    if locale:
+        window.deiconify()
     window.mainloop()

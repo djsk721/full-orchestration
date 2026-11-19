@@ -1,27 +1,25 @@
 # Release candidate platform compatibility
 
-**PASS** denotes a result executed in the stated environment. **PARTIAL** identifies the verified subset. **FAIL** denotes an executed check with a failing result. **NOT VERIFIED** denotes missing execution evidence. **NOT SUPPORTED** describes an unavailable product target.
+**PASS** denotes a result executed in the stated environment. **PARTIAL** identifies a verified subset or a missed target. **FAIL** denotes an executed check with a failing result. **NOT VERIFIED** denotes missing execution evidence. **NOT APPLICABLE** identifies an excluded check or absent release target.
 
 | Feature | Linux | Windows | macOS |
 | --- | --- | --- | --- |
-| Electron history, task search, filters, IPC and recovery | PASS, source and native packages | NOT VERIFIED | NOT VERIFIED |
-| Tk registration, Provider profiles, DAG and Git approval | PASS, scripted inference and real execution | NOT VERIFIED | NOT VERIFIED |
-| Python Supervisor, SQLite, cancellation and restart | PASS | NOT VERIFIED | NOT VERIFIED |
-| TypeScript policies and Python/TypeScript contract parity | PASS | NOT VERIFIED | NOT VERIFIED |
-| Provider selection and Harness execution | PARTIAL, installed OpenCode and Managed via loopback API | NOT VERIFIED | NOT VERIFIED |
-| Authenticated hosted inference | NOT VERIFIED | NOT VERIFIED | NOT VERIFIED |
-| MCP Gateway and uncertain external writes | PARTIAL, HTTP loopback and actual local state journal | NOT VERIFIED | NOT VERIFIED |
-| Native terminal and process containment | PASS, POSIX PTY and process groups | NOT VERIFIED, ConPTY and Job Objects | NOT VERIFIED |
-| SSH shell and Worker client | PASS, real local OpenSSH server | NOT VERIFIED | NOT VERIFIED |
-| Worker server | PASS, transport outage and Supervisor restart | NOT SUPPORTED | NOT SUPPORTED |
-| Git Worktrees, branch movement and merge safety | PASS, real Git, Unicode and long paths | NOT VERIFIED | NOT VERIFIED |
-| Unpacked and packaged app | PASS, AppImage extract-and-run and unpacked preview | NOT VERIFIED, unpacked, NSIS, installed startup and data retention | NOT SUPPORTED, no declared packaging target |
-| GPU | NOT VERIFIED, excluded from candidate scope | NOT VERIFIED | NOT VERIFIED |
+| TypeScript Core, Python parity and configuration contracts | PASS | NOT VERIFIED | NOT VERIFIED |
+| Tk first-run, project and Provider setup, DAG and Git approval | PASS, real Tk, Git and SQLite with scripted model responses | NOT VERIFIED | NOT VERIFIED |
+| Python Supervisor, SQLite, Agent, cancellation and restart | PASS | NOT VERIFIED, source and frozen tests prepared | NOT VERIFIED |
+| Provider routing, Managed and installed OpenCode Harness | PASS, local API fixture with actual job and process execution | NOT VERIFIED | NOT VERIFIED |
+| Installed OpenCode and Codex interactive CLI | PASS, isolated offline startup, focus, input, resize and exit | NOT VERIFIED, manual acceptance prepared | NOT VERIFIED |
+| MCP policies, uncertain writes and durable checkpoints | PASS, controlled tool and loopback fixtures against actual Supervisor and Store | NOT VERIFIED | NOT VERIFIED |
+| ANSI, scrollback, interactive input and process containment | PASS, real POSIX PTY, including Unicode clipboard and child cleanup | NOT VERIFIED, ConPTY and Job Object tests prepared | NOT VERIFIED |
+| 8,000-line output and multi-session performance | PARTIAL, throughput and integrity passed. Some multi-session event delays exceeded 90 ms. | NOT VERIFIED | NOT VERIFIED |
+| Korean IME and Windows scales 100%, 125%, 150% | NOT APPLICABLE | NOT VERIFIED, manual acceptance prepared | NOT APPLICABLE |
+| SSH shell and Worker clients | PASS, pinned real loopback OpenSSH, Python and TypeScript | NOT VERIFIED, native SSH profile setup prepared | NOT VERIFIED |
+| Headless Worker server | PASS, transport outage, reconnect and Supervisor restart | NOT APPLICABLE, Linux release target | NOT APPLICABLE, Linux release target |
+| File and Git Worktree policy, branch movement and merge safety | PASS, real Git, Unicode and long paths | NOT VERIFIED, junction and read-only-file checks prepared | NOT VERIFIED |
+| Read-only Electron | PASS, source, unpacked and AppImage extract-and-run | NOT VERIFIED | NOT VERIFIED |
+| Native release packaging | PASS, x64 AppImage generated and opened in extract-and-run mode | NOT VERIFIED, NSIS lifecycle and standalone Tk package checks prepared | NOT APPLICABLE, no declared package target |
+| Authenticated external inference and GPU | NOT APPLICABLE | NOT APPLICABLE | NOT APPLICABLE |
 
-**Linux:** local candidate regression passes. The separate hosted-provider acceptance gate remains open.
+Linux passed 99 regression checks with two Windows-only skips. Platform-independent checks apply to the Linux execution reported above. Windows readiness requires native CI evidence, followed by manual IME and scale acceptance on a Windows desktop. macOS behavior remains unmeasured.
 
-**Windows:** blocked pending an actual Windows run. The [native verification procedure](windows-native-verification.md) reuses the shared suite and checks the installed application.
-
-**macOS:** outside this release. The declared packaging targets are Linux AppImage and Windows NSIS, and the verification workflow has Linux and Windows jobs. No macOS release blocker is inferred from these results.
-
-**Overall:** blocked on Windows native evidence and authenticated external inference.
+See [terminal measurements](terminal-performance-qa.md), [Windows CI and packaging](windows-ci-readiness.md) and [native Windows verification](windows-native-ux-validation.md).

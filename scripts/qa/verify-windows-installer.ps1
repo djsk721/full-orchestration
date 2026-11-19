@@ -12,6 +12,8 @@ if (Get-ItemProperty -Path $registries -ErrorAction SilentlyContinue | Where-Obj
 
 $installers = @(Get-ChildItem (Join-Path $root 'apps\desktop\release') -File -Filter '*.exe')
 if ($installers.Count -ne 1) { throw 'Expected one NSIS installer from npm run verify -- --ui --package.' }
+Write-Host "Installer: $($installers[0].Name) ($($installers[0].Length) bytes)"
+Write-Host "SHA256: $((Get-FileHash -LiteralPath $installers[0].FullName).Hash)"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("orchestra-installer-" + [guid]::NewGuid().ToString('N'))
 $target = Join-Path $testRoot 'install'
 $data = Join-Path $env:LOCALAPPDATA 'ModelOrchestration'
@@ -55,8 +57,10 @@ try {
     $dataCreated = $true
     & $python 'apps/desktop/tests/legacy_fixture.py' $data '--installer-persistence'
     if ($LASTEXITCODE -ne 0) { throw 'Python failed to create the isolated user-data fixture.' }
+    [IO.File]::WriteAllText((Join-Path $data 'ui_prefs.json'), '{"locale":"en","theme":"light"}')
+    [IO.File]::WriteAllText((Join-Path $data 'ui-workspace.json'), '{"version":1,"sidebar_hidden":true}')
     $originalHashes = @{}
-    foreach ($name in @('state.db', 'registry.json', 'workspace.json')) {
+    foreach ($name in @('state.db', 'registry.json', 'workspace.json', 'ui_prefs.json', 'ui-workspace.json')) {
         $originalHashes[$name] = (Get-FileHash -LiteralPath (Join-Path $data $name)).Hash
     }
     $env:ORCHESTRA_PREVIEW_EXECUTABLE = $binary
@@ -69,6 +73,7 @@ try {
         Assert-DataRetained
         Remove-Preview
         Assert-DataRetained
+        Write-Host "PASS: $stage, Electron startup and shutdown, uninstall and unchanged SQLite/configuration hashes"
     }
 } finally {
     $env:ORCHESTRA_PREVIEW_EXECUTABLE = $originalExecutable

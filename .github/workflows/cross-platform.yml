@@ -39,12 +39,52 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb xauth tk libnss3 libgtk-3-0t64 libasound2t64 libgbm1
       - run: python -m pip install -r requirements-desktop.txt
+        id: python-deps
       - run: npm ci
-      - run: npm run verify -- --ui --package
-      - name: Exercise the installed Windows app
+      - name: Run shared Linux regressions and packaging
+        if: runner.os == 'Linux'
+        run: npm run verify -- --ui --package
+      - name: Run shared Windows regressions and NSIS packaging
+        id: windows-shared
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/qa/verify-windows-installer.ps1
+        run: |
+          npm.cmd run verify -- --ui --package *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-shared.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check native ConPTY, Unicode and layout restore
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.python-deps.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./scripts/qa/verify-windows-workspace.ps1 -WorkspaceOnly -Benchmark *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-conpty.log')
+      - name: Exercise the installed Windows app
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows-shared.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./scripts/qa/verify-windows-installer.ps1 *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-nsis.log')
+      - name: Build and exercise the standalone Windows workspace
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.python-deps.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./Build-Windows.ps1 -Python python -InstallBuildDependency -VerifyWorkspace *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-frozen-tk.log')
+      - name: Retain Windows verification evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-verification-evidence
+          path: ${{ runner.temp }}/orchestra-windows-*.log
+          if-no-files-found: ignore
+      - name: Retain the built Windows installer
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-nsis-installer
+          path: apps/desktop/release/*.exe
+          if-no-files-found: ignore
+          retention-days: 7
 
   portable-without-runtime:
     runs-on: ubuntu-24.04

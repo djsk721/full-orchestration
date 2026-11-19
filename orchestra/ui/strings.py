@@ -5,6 +5,7 @@ LOCALES = ("ko", "en")
 
 NAV_GROUPS = (
     ("WORKSPACE", (
+        ("workspace", "nav.workspace"),
         ("home", "nav.home"),
         ("projects", "nav.projects"),
         ("jobs", "nav.jobs"),
@@ -64,6 +65,7 @@ STRINGS = {
     "ko": {
         "app.brand": "Model Orchestration",
         "app.subtitle": "AI Engineering Workspace",
+        "nav.workspace": "작업 공간",
         "nav.home": "홈",
         "nav.projects": "프로젝트",
         "nav.jobs": "작업",
@@ -121,12 +123,13 @@ STRINGS = {
         "wizard.perm_write": "파일 변경: 허용된 변경 경로 내 전용 Git Worktree에서만 수정 후 커밋합니다.",
         "wizard.perm_mcp": "외부 도구 쓰기: write 권한 MCP 호출은 매번 사용자 승인 절차를 거칩니다.",
         "wizard.perm_git": "Git 병합 보호: 통합 QA를 통과한 정확한 후보 SHA를 사용자가 승인할 때만 대상 브랜치에 병합합니다.",
-        "provider.simple_hint": "간편 모드에서는 Provider 종류, 연결 확인, 모델 선택 및 기본 모델 여부만 설정합니다.",
-        "provider.advanced_hint": "고급 모드에서는 Runtime 주소, 환경 변수 이름(비밀값 미저장), 실행 파일 경로 및 Context 한도를 조정합니다.",
+        "provider.simple_hint": "Provider 종류와 로컬 Runtime 주소를 설정한 뒤 연결을 확인하고 모델을 선택합니다.",
+        "provider.advanced_hint": "고급 모드에서는 환경 변수 이름(비밀값 미저장), 실행 파일 경로 및 Context 한도를 조정합니다.",
     },
     "en": {
         "app.brand": "Model Orchestration",
         "app.subtitle": "AI Engineering Workspace",
+        "nav.workspace": "Workspace",
         "nav.home": "Home",
         "nav.projects": "Projects",
         "nav.jobs": "Tasks",
@@ -184,8 +187,8 @@ STRINGS = {
         "wizard.perm_write": "File modifications: edits only inside isolated Git worktrees and allowed write paths.",
         "wizard.perm_mcp": "External tool writes: write-scoped MCP calls always require explicit approval.",
         "wizard.perm_git": "Git merge protection: fast-forwards only after QA passes and the exact candidate SHA is approved.",
-        "provider.simple_hint": "Simple mode configures provider type, connection verification, model selection, and defaults.",
-        "provider.advanced_hint": "Advanced mode configures runtime endpoint, auth env var name (never raw secrets), executable, and context limit.",
+        "provider.simple_hint": "Set the Provider type and local runtime URL, then test the connection and select a model.",
+        "provider.advanced_hint": "Advanced mode sets an authentication variable name, executable, and context limit. Secret values stay outside the form.",
     },
 }
 

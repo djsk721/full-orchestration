@@ -180,6 +180,7 @@ def exercise(window, app, repo, data, server, url):
         panel = app.terminals[app.terminal_book.select()][1][0]
         wait(window, lambda: "approved change" in panel.surface.get("1.0", "end"), "terminal output")
 
+        app.show("jobs")
         failed = submit_qa("Leave the branch intact on QA failure", [sys.executable, "-c", "raise SystemExit(7)"])
         wait(window, lambda: store.job(failed)["state"] == "FAILED", "QA failure")
         wait(window, lambda: '"exit_code": 7' in app.detail.get("1.0", "end"), "visible QA error")
