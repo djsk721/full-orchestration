@@ -5,7 +5,8 @@ import os
 import time
 from pathlib import Path
 
-from .core import Invalid, path_in, require
+from .core import Invalid, Stopped, path_in, require
+from .execution_state import integration_qa_passed
 from .processes import env_for_process, run
 
 
@@ -83,7 +84,14 @@ class GitGate:
         evidence = []
         for i, argv in enumerate(commands, 1):
             start = time.monotonic()
-            code, _ = run(argv, cwd=path, env=env_for_process(), timeout=600, stop=self.stop)
+            try:
+                code, _ = run(argv, cwd=path, env=env_for_process(), timeout=600, stop=self.stop)
+            except (TimeoutError, Stopped) as error:
+                self.store.event(self.job["id"], task, "qa.interrupted", {
+                    "index": i, "status": "timeout" if isinstance(error, TimeoutError) else "stopped",
+                    "elapsed_sec": round(time.monotonic() - start, 3),
+                }, route)
+                raise
             record = {"index": i, "exit_code": code, "elapsed_sec": round(time.monotonic() - start, 3)}
             self.store.event(self.job["id"], task, "qa.result", record, route)
             require(code == 0, f"QA 명령 {i} 실패 (종료 코드 {code}).")
@@ -95,13 +103,15 @@ class GitGate:
         path = self.worktree("_integration", base, commits)
         candidate = self.head(path)
         evidence = self.qa(path, self.job["plan"].get("qa", []))
-        return {"base": base, "candidate": candidate if commits else None, "qa": evidence}
+        changed = self.git(path, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, candidate) if commits else b""
+        files = sorted(os.fsdecode(name).replace(os.sep, "/") for name in changed.split(b"\0") if name)
+        return {"base": base, "candidate": candidate if commits else None, "qa": evidence, "changed": files}
 
     def apply(self, result):
         ref = self.ref()
         candidate = result["candidate"]
         path = self.root / "_integration"
-        require(self.head(path) == candidate and result["qa"] and not self.changed(path),
+        require(self.head(path) == candidate and integration_qa_passed(result.get("qa")) and not self.changed(path),
                 "승인된 QA 후보가 변경되었습니다.")
         current = self.base()
         if current == candidate:

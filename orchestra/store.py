@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .core import Invalid, digest, encode, require
+from .execution_state import merge_candidate_ready
 from . import desktop_contract
 
 
@@ -334,11 +335,10 @@ class Store:
             state = row["state"]
             if action == "merge":
                 result = row["result"] or {}
-                require(state == "AWAITING_APPROVAL" and candidate and result.get("candidate") == candidate,
+                require(merge_candidate_ready(row) and result["candidate"] == candidate,
                         "현재 QA 후보에 대한 승인이 필요합니다.")
-                if approval_revision is not None:
-                    require(result.get("approval_revision") == approval_revision,
-                            "QA 검증이 갱신되었습니다. 현재 후보를 다시 검토하세요.")
+                require(result.get("approval_revision") == approval_revision,
+                        "현재 QA 검증 회차의 승인이 필요합니다. 후보를 다시 검토하세요.")
                 state = "MERGE_QUEUED"
             elif action == "retry":
                 require(state == "FAILED", "실패한 작업만 재시도할 수 있습니다.")
@@ -352,7 +352,10 @@ class Store:
                 if row["owner"] is None:
                     state = "CANCELLED"
             conn.execute("UPDATE jobs SET state=?,action=?,updated=? WHERE id=?", (state, action, time.time(), job))
-            self.event_tx(conn, job, None, "job.request", {"action": action, "state": state, "candidate": candidate})
+            event = {"action": action, "state": state, "candidate": candidate}
+            if action == "merge":
+                event["approval_revision"] = approval_revision
+            self.event_tx(conn, job, None, "job.request", event)
 
     def attach_foreground(self, job, token):
         with self.connect(write=True) as conn:

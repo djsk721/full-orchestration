@@ -35,3 +35,5 @@ npm run verify -- --ui --package
 The same command runs the TypeScript and Python suites, both desktop smoke tests and native adapter contracts on Linux and Windows. Use `npm run verify -- --core-only` for tests without Python or a desktop. On Linux, add `--ssh` to exercise a disposable OpenSSH server and Worker. Native Windows evidence is required for ConPTY, Job Objects, and the installer.
 
 The Tk workflow runs a real Supervisor from project registration through approved Git integration against a scripted model API. Electron's tests also terminate the app during a real QA command and check the result after reopening. Add `--harness` for installed CLI checks. Observe startup and credential presence separately from authenticated model execution.
+
+On a disposable native Windows host, run `./scripts/qa/verify-windows-installer.ps1` after `npm run verify -- --ui --package` to test the installed NSIS build. The script uses a temporary installation directory and runs the same Playwright tests before uninstalling it. The Windows CI job includes this step.

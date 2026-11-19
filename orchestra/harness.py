@@ -198,7 +198,10 @@ class Managed:
                     result = self.execute(name, args, signature)
                     data["seen"][signature] = data["seen"].get(signature, 0) + 1
                     self.emit("tool.call", {"name": name, "input_hash": signature, "status": "succeeded"})
-                except (AwaitApproval, UncertainEffect):
+                except UncertainEffect:
+                    self.emit("tool.call", {"name": name, "status": "uncertain"})
+                    raise
+                except AwaitApproval:
                     raise
                 except (ValueError, OSError, RuntimeError) as exc:
                     if isinstance(exc, Stopped):

@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .core import atomic_json, config_check, plan_check, require
 from .discovery import discover, migrate, rollback
+from .execution_state import MERGE_EVIDENCE, merge_candidate_ready, task_stage
 from .platform.desktop import open_directory, prepare_dpi
 from .store import Store
 from .supervisor import read_config, start_supervisor
@@ -29,6 +30,10 @@ STATES = {
 
 def formatted(value):
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def changed_files(rows):
+    return sorted({path for row in rows.values() for path in (row["result"] or {}).get("changed", [])})
 
 
 def sample_plan():
@@ -215,7 +220,11 @@ class Desktop:
         self.button(toolbar2, "Supervisor 시작", self.restart_supervisor, side="right")
         self.detail_title = ttk.Label(frame, text="작업 상세", style="Section.TLabel")
         self.detail_title.grid(row=5, column=0, sticky="w", pady=(9, 2))
-        self.detail = self.text(frame, 6)
+        self.detail_evidence = ttk.Label(frame, style="Muted.TLabel", wraplength=620, justify="left")
+        self.detail_evidence.grid(row=6, column=0, sticky="nw", pady=(2, 2))
+        frame.rowconfigure(6, weight=0)
+        frame.rowconfigure(7, weight=3)
+        self.detail = self.text(frame, 7)
         self.write(self.detail, "작업을 선택하면 상태와 실행 이벤트가 표시됩니다.", True)
         return frame
 
@@ -350,6 +359,18 @@ class Desktop:
         rows = self.store.tasks(job["id"])
         state = STATES.get(job["state"], job["state"])
         self.detail_title.configure(text=f'{job["plan"]["title"]}  ·  {state}')
+        result = (job["result"] or {}) if job["state"] in (*MERGE_EVIDENCE, "SUCCEEDED") else {}
+        candidate = result.get("candidate")
+        files = result["changed"] if "changed" in result else changed_files(rows)
+        evidence = []
+        if files:
+            listed = ", ".join(files[:5])
+            evidence.append(f"변경 파일 {len(files)}개 · {listed}" + (" 외" if len(files) > 5 else ""))
+        if checks := result.get("qa"):
+            evidence.append(f"통합 QA {len(checks)}개 통과")
+        if candidate:
+            evidence.append(f'병합 후보 {candidate[:12]} · {job["plan"]["target"]}')
+        self.detail_evidence.configure(text="\n".join(evidence))
         updates = self.store.events(job["id"], self.last_seq, 250)
         if updates:
             self.last_seq = updates[-1]["seq"]
@@ -360,9 +381,14 @@ class Desktop:
                 self.events_cached[item["seq"]] = f"{clock}  {task}  {route}  {item['event_type']}  {json.dumps(item['payload'], ensure_ascii=False)}"
             self.events_cached = dict(list(self.events_cached.items())[-350:])
         if updates or not self.detail.get("1.0", "end-1c"):
-            states = "\n".join(f'{key}   {STATES.get(row["state"], row["state"])}   시도 {row["attempt"]}' for key, row in rows.items())
+            stages = ((key, task_stage(job["state"], row["state"]), row["attempt"]) for key, row in rows.items())
+            states = "\n".join(f'{key}   {STATES.get(stage, stage)}   시도 {attempt}' for key, stage, attempt in stages)
+            top, bottom = self.detail.yview()
             self.write(self.detail, states + "\n\n" + "\n".join(self.events_cached.values()), True)
-            self.detail.see("end")
+            if bottom >= .99:
+                self.detail.see("end")
+            else:
+                self.detail.yview_moveto(top)
 
     def notice(self, text):
         banner = tk.Toplevel(self.window)
@@ -393,9 +419,10 @@ class Desktop:
             job = self.get_job()
             candidate = None
             if action == "merge":
-                candidate = (job["result"] or {}).get("candidate")
-                require(job["state"] == "AWAITING_APPROVAL" and candidate, "통합 QA를 통과한 후보가 필요합니다.")
-                if not messagebox.askyesno("Git 병합 승인", f'{job["plan"]["target"]}에 다음 커밋을 병합하시겠습니까?\n\n{candidate}', parent=self.window):
+                job, tasks, _ = self.store.status_snapshot(job["id"], 0, 0)
+                require(merge_candidate_ready(job), "통합 QA를 통과한 후보가 필요합니다.")
+                candidate = job["result"]["candidate"]
+                if not self.review_merge(job, tasks):
                     return
             if action == "cancel" and not messagebox.askyesno("작업 중지", "선택한 작업을 중지하시겠습니까?", parent=self.window):
                 return
@@ -406,6 +433,40 @@ class Desktop:
                 self.restart_supervisor()
             self.refresh_jobs()
         self.action(apply)
+
+    def review_merge(self, job, tasks):
+        result = job["result"]
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Git 병합 승인")
+        dialog.geometry("720x480")
+        dialog.transient(self.window)
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+        notes = self.text(dialog, 0)
+        revision = result.get("approval_revision") or "이전 실행 기록 (회차 ID 없음)"
+        files = result["changed"] if "changed" in result else changed_files(tasks)
+        checks = [f'{index}. 통과 (종료 코드 {check["exit_code"]})' for index, check in enumerate(result["qa"], 1)]
+        lines = ["병합 신청 가능 · 실행 시 후보와 대상 브랜치를 다시 검증합니다.",
+                 f'대상 브랜치  {job["plan"]["target"]}', f'후보 SHA  {result["candidate"]}',
+                 f"QA 검증 회차  {revision}", "", "현재 통합 QA", *checks, "", "변경 파일",
+                 *[json.dumps(name, ensure_ascii=False) for name in files]]
+        self.write(notes, "\n".join(lines), True)
+        buttons = ttk.Frame(dialog, padding=8)
+        buttons.grid(row=1, column=0, sticky="ew")
+        approved = False
+
+        def approve():
+            nonlocal approved
+            approved = True
+            dialog.destroy()
+
+        self.button(buttons, "이 후보 승인", approve, True)
+        dismiss = self.button(buttons, "닫기", dialog.destroy)
+        dialog.bind("<Escape>", lambda _: dialog.destroy())
+        dialog.grab_set()
+        dismiss.focus_set()
+        dialog.wait_window()
+        return approved
 
     def tool_decision(self):
         def review():

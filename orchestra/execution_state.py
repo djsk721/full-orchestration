@@ -1,12 +1,28 @@
 """Supervisor-owned execution decisions and presentation states."""
 from __future__ import annotations
 
+import re
+
 LIVE = frozenset({"PREPARING", "RUNNING", "VERIFYING", "AWAITING_TOOL", "RETRY_WAIT"})
 INCOMPLETE = LIVE | {"QUEUED"}
 TERMINAL = frozenset({"FAILED", "CANCELLED", "SUCCEEDED", "MERGED"})
 BLOCKED = frozenset({"AWAITING_TOOL", "FAILED"})
 MERGE_EVIDENCE = ("AWAITING_APPROVAL", "MERGE_QUEUED", "MERGING", "MERGED")
 RUNNABLE = frozenset({"QUEUED", "RETRY_WAIT"})
+
+
+def integration_qa_passed(checks):
+    return isinstance(checks, list) and bool(checks) and all(
+        isinstance(check, dict) and type(check.get("exit_code")) is int and check["exit_code"] == 0
+        for check in checks)
+
+
+def merge_candidate_ready(job):
+    result = job.get("result") or {}
+    candidate = result.get("candidate")
+    return (job["state"] == "AWAITING_APPROVAL" and isinstance(candidate, str)
+            and re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", candidate) is not None
+            and integration_qa_passed(result.get("qa")))
 
 
 def task_stage(job_state, state):

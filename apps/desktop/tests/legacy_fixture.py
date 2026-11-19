@@ -61,6 +61,7 @@ def main():
     store = Store(directory)
     if sys.argv[2:] == ["--reopen"]:
         return
+    persist_install = sys.argv[2:] == ["--installer-persistence"]
     if sys.argv[2:] in (["--qa-failure"], ["--running"]):
         failure = sys.argv[2] == "--qa-failure"
         repo = directory / "fixture repo"
@@ -97,7 +98,7 @@ raise SystemExit(0 if release.exists() else 9)
             assert store.job(job)["state"] == "FAILED"
         print(json.dumps({"id": job}))
         return
-    if len(sys.argv) > 2:
+    if len(sys.argv) > 2 and not persist_install:
         store.event(sys.argv[2], "qa", "qa.followup", {"private": "PRIVATE_EVENT"})
         return
     plan = {
@@ -114,6 +115,9 @@ raise SystemExit(0 if release.exists() else 9)
     }
     config = defaults()
     config["settings"]["background"] = True
+    if persist_install:
+        atomic_json(directory / "registry.json", config)
+        atomic_json(directory / "workspace.json", {"schema_version": 1, "projects": {}, "hosts": {}, "default_model": ""})
     job = store.submit(plan, config, None)
     store.set_task(job, "review", "SUCCEEDED", attempt=1)
     store.set_task(job, "qa", "SUCCEEDED", attempt=1)

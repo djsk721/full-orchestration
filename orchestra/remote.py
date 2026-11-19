@@ -14,8 +14,9 @@ import time
 from pathlib import Path
 
 from .core import Invalid, SECRET_FILE, atomic_json, data_directory, encode, require
-from .execution_state import MERGE_EVIDENCE, task_stage
+from .execution_state import MERGE_EVIDENCE, TERMINAL, task_stage
 from .harness import workspace_path
+from .platform.process_control import process_lock
 from .processes import env_for_process, run
 from .ssh import MAX_REQUEST, PROTOCOL, remote_path
 from .store import Store
@@ -94,7 +95,10 @@ def _status(root):
     path = root / "supervisor.json"
     try:
         status = json.loads(path.read_text(encoding="utf-8"))
-        return status["at"] if time.time() - status["at"] < 8 else None
+        if not 0 <= time.time() - status["at"] < 8:
+            return None
+        with process_lock(root / "supervisor.lock") as available:
+            return None if available else status
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -167,7 +171,8 @@ def dispatch(root, message, *, restart=True):
         active_jobs = [job for job in history if job["state"] not in TERMINAL_STATES]
         active_agents = sum(task["state"] in ("PREPARING", "RUNNING", "VERIFYING", "AWAITING_TOOL")
                             for job in active_jobs for task in store.tasks(job["id"]).values())
-        info.update(repos=policy["repos"], heartbeat=_status(root), git=bool(shutil.which("git")),
+        worker = _status(root) or {}
+        info.update(repos=policy["repos"], heartbeat=worker.get("at"), git=bool(shutil.which("git")),
                     active_jobs=len(active_jobs), active_agents=active_agents,
                     recent_failed_jobs=[job["id"] for job in history if job["state"] == "FAILED"][:10],
                     python=platform.python_version(), clis={name: bool(path) for name, path in scan_clis().items()},
@@ -197,6 +202,7 @@ def dispatch(root, message, *, restart=True):
     key = job_id(args["job"])
     if method == "status":
         job, tasks, events = store.status_snapshot(key, max(0, int(args.get("after", 0))), 150)
+        worker = _status(root) or {}
         if restart:
             _ensure_running(root, job)
         for event in events:
@@ -207,7 +213,8 @@ def dispatch(root, message, *, restart=True):
                 "validated", "file", "commit", "provider", "manual_model", "manual_harness",
             ) if name in payload}
         evidence = (job["result"] or {}) if job["state"] in MERGE_EVIDENCE else {}
-        return {"id": key, "state": job["state"], "heartbeat": job["heartbeat"],
+        heartbeat = job["heartbeat"] if job["owner"] and job["owner"] == worker.get("owner") and job["state"] not in TERMINAL else None
+        return {"id": key, "state": job["state"], "heartbeat": heartbeat, "worker_heartbeat": worker.get("at"),
                 "candidate": evidence.get("candidate"), "approval_revision": evidence.get("approval_revision"),
                 "tasks": [{"id": task_id, "state": task_stage(job["state"], row["state"]), "attempt": row["attempt"],
                            "changed": (row["result"] or {}).get("changed", [])}

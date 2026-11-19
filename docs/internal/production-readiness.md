@@ -1,5 +1,7 @@
 # Cross-platform integration and production readiness
 
+See the [release readiness follow-up](release-readiness.md) for the primary desktop decision, expanded outage tests and native installer verification plan.
+
 Verification date: 2026-11-19. The test host was Linux 6.8.0 with Node 24.14.1, Python 3.11.5 and OpenSSH 8.9p1. Windows and macOS results require native execution on those platforms. The runs use temporary data directories, repositories and loopback services. GPU checks, inference and acceleration are outside this run.
 
 The Linux suite passed 33 Python regression tests and 25 TypeScript tests. Each of the three Electron targets ran four Playwright scenarios. The two native Tk scenarios and the live OpenSSH Worker test also passed.

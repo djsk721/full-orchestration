@@ -1,4 +1,5 @@
 """Drive the native UI through a real Supervisor and Git with scripted inference."""
+import os
 import time
 import sys
 import tempfile
@@ -46,14 +47,46 @@ def dialog(window, title):
 def exercise(window, app, repo, data, server, url):
     confirmations = []
     errors = []
-    declines = {"Git 병합 승인"}
 
     def confirm(title, message, **_):
         confirmations.append((title, message))
-        if title in declines:
-            declines.remove(title)
-            return False
         return True
+
+    def inspect_merge(result, decision, screenshot=False):
+        problems = []
+
+        def inspect():
+            modal = dialog(window, "Git 병합 승인")
+            try:
+                field = next(widget for widget in children(modal) if isinstance(widget, tk.Text))
+                review = field.get("1.0", "end")
+                for expected in (result["candidate"], result["approval_revision"], "대상 브랜치  main",
+                                 "ui-result.txt", "병합 신청 가능", "1. 통과 (종료 코드 0)"):
+                    assert expected in review, expected
+                if screenshot and (path := os.environ.get("ORCHESTRA_QA_APPROVAL_SCREENSHOT")):
+                    from PIL import ImageGrab
+                    modal.update_idletasks()
+                    x, y = modal.winfo_rootx(), modal.winfo_rooty()
+                    ImageGrab.grab(bbox=(x, y, x + modal.winfo_width(), y + modal.winfo_height())).save(path)
+                press(modal, decision)
+            except Exception as error:
+                problems.append(error)
+                modal.destroy()
+
+        window.after(50, inspect)
+        press(app.pages["jobs"], "병합 승인")
+        if problems:
+            raise problems[0]
+
+    def submit_qa(title, command):
+        app.guided_dialog()
+        guide = dialog(window, "작업 계획 만들기")
+        guide.set("intent", title)
+        guide.set("strategy", STRATEGIES[2])
+        guide.set("qa", format_commands([command]))
+        press(guide.footer, "검토할 계획 생성")
+        press(dialog(window, "실행 계획 검토").footer, "검증 후 실행")
+        return app.selected_job
 
     with patch("tkinter.filedialog.askdirectory", return_value=str(repo)), \
             patch("tkinter.messagebox.askyesno", side_effect=confirm), \
@@ -126,18 +159,39 @@ def exercise(window, app, repo, data, server, url):
         app.open_job(job)
         evidence = app.detail.get("1.0", "end")
         assert "qa.result" in evidence and '"exit_code": 0' in evidence
+        summary = app.detail_evidence.cget("text")
+        assert "ui-result.txt" in summary and "통합 QA 1개 통과" in summary and result["candidate"][:12] in summary
+        if screenshot := os.environ.get("ORCHESTRA_QA_TK_SCREENSHOT"):
+            from PIL import ImageGrab
+            window.update()
+            x, y = window.winfo_rootx(), window.winfo_rooty()
+            ImageGrab.grab(bbox=(x, y, x + window.winfo_width(), y + window.winfo_height())).save(screenshot)
         assert not (repo / "ui-result.txt").exists()
-        press(app.pages["jobs"], "병합 승인")
+        inspect_merge(result, "닫기", screenshot=True)
         assert store.job(job)["state"] == "AWAITING_APPROVAL"
-        press(app.pages["jobs"], "병합 승인")
+        inspect_merge(result, "이 후보 승인")
         wait(window, lambda: store.job(job)["state"] == "MERGED", "approved Git integration")
-        assert confirmations[-1][0] == "Git 병합 승인" and result["candidate"] in confirmations[-1][1]
+        [approval] = [event for event in store.events(job) if event["event_type"] == "job.request"]
+        assert approval["payload"]["approval_revision"] == result["approval_revision"]
         assert git(repo, "rev-parse", "HEAD") == result["candidate"]
         assert (repo / "ui-result.txt").read_text(encoding="utf-8") == "approved change\n"
         app.new_terminal("Verify merged file", [sys.executable, "-c",
                          "from pathlib import Path; print(Path('ui-result.txt').read_text().strip(), flush=True)"], cwd=repo)
         panel = app.terminals[app.terminal_book.select()][1][0]
         wait(window, lambda: "approved change" in panel.surface.get("1.0", "end"), "terminal output")
+
+        failed = submit_qa("Leave the branch intact on QA failure", [sys.executable, "-c", "raise SystemExit(7)"])
+        wait(window, lambda: store.job(failed)["state"] == "FAILED", "QA failure")
+        wait(window, lambda: '"exit_code": 7' in app.detail.get("1.0", "end"), "visible QA error")
+        assert app.job_controls["병합 승인"].instate(["disabled"])
+        started = data / "cancel-started"
+        active = submit_qa("Cancel a running verification", [sys.executable, "-c",
+                           "from pathlib import Path; import sys,time; Path(sys.argv[1]).touch(); time.sleep(30)", str(started)])
+        wait(window, started.exists, "running verification")
+        press(app.pages["jobs"], "중지")
+        wait(window, lambda: store.job(active)["state"] == "CANCELLED", "UI cancellation")
+        assert any(event["event_type"] == "qa.interrupted" for event in store.events(active))
+        assert git(repo, "rev-parse", "HEAD") == result["candidate"]
         assert not errors, errors
 
 

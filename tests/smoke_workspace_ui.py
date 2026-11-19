@@ -78,11 +78,29 @@ with tempfile.TemporaryDirectory(prefix="orchestra-workspace-ui-") as directory:
             time.sleep(.04)
         assert "ready" in panel.surface.get("1.0", "end")
         assert any(name.startswith("colors_green") for name in panel.surface.tag_names())
+        first = app.terminal_book.select()
+        stopped = root / "closed-terminal-survived"
+        app.new_terminal("Second PTY", [sys.executable, "-c",
+                         "from pathlib import Path; import sys,time; print('second-only',flush=True); "
+                         "time.sleep(3); Path(sys.argv[1]).touch()", str(stopped)], cwd=repo)
+        other = app.terminals[app.terminal_book.select()][1][0]
+        deadline = time.monotonic() + 8
+        while "second-only" not in other.surface.get("1.0", "end") and time.monotonic() < deadline:
+            window.update()
+            time.sleep(.04)
+        assert "second-only" in other.surface.get("1.0", "end")
+        assert "second-only" not in panel.surface.get("1.0", "end")
+        started = time.monotonic()
+        app.remove_terminal()
+        app.terminal_book.select(first)
+        deadline = time.monotonic() + 8
         panel.send("desktop smoke\r")
         while "received:desktop smoke" not in panel.surface.get("1.0", "end") and time.monotonic() < deadline:
             window.update()
             time.sleep(.04)
         assert "received:desktop smoke" in panel.surface.get("1.0", "end")
+        time.sleep(max(0, started + 3.15 - time.monotonic()))
+        assert not stopped.exists(), "closed terminal left its command running"
         app.remove_terminal()
         app.show("home")
         window.update()

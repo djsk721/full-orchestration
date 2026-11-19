@@ -14,9 +14,10 @@ from shutil import which
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from orchestra.core import Invalid
+from orchestra.core import Invalid, Temporary
 from orchestra.remote import register_project
 from orchestra.ssh import SSHClient, fingerprint, scan_keys, ssh_env, trust_key
+from orchestra.store import Store
 from orchestra.terminal import Pty
 from orchestra.supervisor import read_config
 from orchestra.workspace import STRATEGIES, draft_plan, save_registry
@@ -59,17 +60,44 @@ AllowUsers {user}
 """)
     log = root / "ssh.log"
     executable = which("sshd") or "/usr/sbin/sshd"
+
+    def wait_for_sshd(daemon):
+        for _ in range(70):
+            if daemon.poll() is not None:
+                raise AssertionError(log.read_text())
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=.15):
+                    return
+            except OSError:
+                time.sleep(.04)
+        raise AssertionError("sshd did not start")
+
+    def await_condition(predicate, timeout=18):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if result := predicate():
+                return result
+            time.sleep(.1)
+        raise AssertionError("Worker did not reach the expected state")
+
+    def assert_terminal_output(shell, marker):
+        shell.write(f"printf '%s\\n' {marker}\r")
+        expected = f"\r\n{marker}\r\n".encode()
+        received = bytearray()
+        deadline = time.monotonic() + 8
+        while expected not in received and time.monotonic() < deadline:
+            readable, _, _ = select.select([shell.master], [], [], .2)
+            if readable:
+                chunk = shell.read()
+                if not chunk:
+                    break
+                received.extend(chunk)
+        assert expected in received, "SSH terminal did not return the expected marker"
+
     with log.open("wb") as handle:
         daemon = subprocess.Popen([executable, "-D", "-e", "-f", str(config)], stderr=handle)
         try:
-            for _ in range(70):
-                if daemon.poll() is not None:
-                    raise AssertionError(log.read_text())
-                try:
-                    with socket.create_connection(("127.0.0.1", port), timeout=.15):
-                        break
-                except OSError:
-                    time.sleep(.04)
+            wait_for_sshd(daemon)
             spec = {"name": "Loopback", "host": "127.0.0.1", "port": port, "user": user,
                     "identity": str(root / "operator"), "auth": "key", "worker_dir": str(source),
                     "python": sys.executable}
@@ -99,17 +127,7 @@ AllowUsers {user}
             assert client.call("info")["repos"] == [str(repo)]
             shell = Pty(client.terminal(str(repo)), None, ssh_env())
             try:
-                shell.write("printf '%s\\n' orch-remote-pty-ok\r")
-                received = bytearray()
-                deadline = time.monotonic() + 5
-                while b"\r\norch-remote-pty-ok\r\n" not in received and time.monotonic() < deadline:
-                    ready, _, _ = select.select([shell.master], [], [], .2)
-                    if ready:
-                        chunk = shell.read()
-                        if not chunk:
-                            break
-                        received.extend(chunk)
-                assert b"\r\norch-remote-pty-ok\r\n" in received, received[-1000:]
+                assert_terminal_output(shell, "orch-remote-pty-ok")
                 started, log_effects = root / "qa-started", root / "qa-effects"
                 qa = r"""from pathlib import Path
 import sys, time
@@ -139,6 +157,9 @@ else:
             worker = state / "supervisor.json"
             old_pid = json.loads(worker.read_text())["pid"]
             os.kill(old_pid, signal.SIGKILL)
+            # Wait for the process-owned lock to be released, even if its status file is fresh.
+            await_condition(lambda: reconnected.call("info")["heartbeat"] is None)
+            assert reconnected.call("status", job=receipt)["heartbeat"] is None
             assert reconnected.call("submit", request_id=key, plan=plan)["id"] == receipt
             deadline = time.monotonic() + 25
             while True:
@@ -154,6 +175,57 @@ else:
             time.sleep(max(0, started.stat().st_mtime + 12.5 - time.time()))
             assert log_effects.read_text() == "recovered run\n"
             assert reconnected.call("submit", request_id=key, plan=plan)["id"] == receipt
+            start_offline, release_offline = root / "offline-started", root / "offline-release"
+            offline_qa = """from pathlib import Path
+import sys,time
+start,release = map(Path,sys.argv[1:])
+start.touch()
+deadline = time.monotonic() + 30
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(.05)
+raise SystemExit(0 if release.exists() else 9)
+"""
+            detached = draft_plan(project | {"host": "local"}, "Complete while disconnected", STRATEGIES[2],
+                                  qa=[[sys.executable, "-c", offline_qa, str(start_offline), str(release_offline)]])
+            offline_id = reconnected.call("submit", request_id="2" * 32, plan=detached)["id"]
+            await_condition(start_offline.exists)
+            before = reconnected.call("status", job=offline_id)
+            [before_task] = before["tasks"]
+            cursor = before["events"][-1]["seq"]
+            daemon.terminate()
+            daemon.wait(timeout=5)
+            try:
+                reconnected.call("status", job=offline_id, after=cursor)
+            except Temporary:
+                pass
+            else:
+                raise AssertionError("status appeared available while sshd was down")
+            release_offline.touch()
+            snapshot = Store(state)
+            await_condition(lambda: snapshot.job(offline_id)["state"] == "SUCCEEDED")
+            daemon = subprocess.Popen([executable, "-D", "-e", "-f", str(config)], stderr=handle)
+            wait_for_sshd(daemon)
+            fresh_terminal = Pty(reconnected.terminal(str(repo)), None, ssh_env())
+            try:
+                assert_terminal_output(fresh_terminal, "orch-remote-pty-reconnected")
+            finally:
+                fresh_terminal.close()
+            after = reconnected.call("status", job=offline_id, after=cursor)
+            assert after["state"] == "SUCCEEDED" and after["heartbeat"] is None
+            assert after["id"] == offline_id and [item["id"] for item in after["tasks"]] == [before_task["id"]]
+            assert after["events"] and all(event["seq"] > cursor for event in after["events"])
+            assert reconnected.call("submit", request_id="2" * 32, plan=detached)["id"] == offline_id
+            start_cancel, release_cancel = root / "cancel-started", root / "cancel-release"
+            cancellation = draft_plan(project | {"host": "local"}, "Cancel from SSH", STRATEGIES[2],
+                                      qa=[[sys.executable, "-c", offline_qa, str(start_cancel), str(release_cancel)]])
+            cancel_id = reconnected.call("submit", request_id="3" * 32, plan=cancellation)["id"]
+            await_condition(start_cancel.exists)
+            reconnected.call("action", job=cancel_id, action="cancel")
+            cancelled = await_condition(lambda: (row := reconnected.call("status", job=cancel_id))["state"] == "CANCELLED" and row)
+            assert cancelled["heartbeat"] is None and cancelled["tasks"][0]["state"] == "CANCELLED"
+            assert sum(event["event_type"] == "job.request" for event in cancelled["events"]) == 1
+            assert [event["payload"].get("status") for event in cancelled["events"]
+                    if event["event_type"] == "qa.interrupted"] == ["stopped"]
             if args.typescript:
                 client_root = root / "client"
                 (client_root / "workspace.json").write_text(json.dumps({"schema_version": 1, "hosts": {"local": spec}}), encoding="utf-8")
@@ -168,7 +240,7 @@ else:
                 following = inspect("worker-status", "local", receipt, str(first["nextCursor"]))
                 assert following["events"] == [] and following["nextCursor"] == first["nextCursor"]
                 print("TypeScript adapter read the same Python Worker run and cursor over OpenSSH.")
-            print("Real loopback OpenSSH: pinning, PTY disconnection, Worker hard restart, lease recovery and deduplication passed.")
+            print("Real loopback OpenSSH: pinning, disconnect and offline completion, Worker restart, recovery, deduplication and cancellation passed.")
         except Exception:
             print(log.read_text(), file=sys.stderr)
             raise

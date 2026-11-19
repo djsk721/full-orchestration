@@ -103,7 +103,13 @@ def http(url, data=None, headers=None, timeout=60, limit=4_000_000, method=None,
         if exc.code in (408, 429) or exc.code >= 500:
             raise Temporary(f"HTTP 서버 오류 ({exc.code}).") from exc
         raise Invalid(f"HTTP 요청이 거절되었습니다 ({exc.code}).") from exc
-    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+    except TimeoutError as exc:
+        raise Temporary("HTTP 요청 시간이 초과되었습니다.") from exc
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            raise Temporary("HTTP 요청 시간이 초과되었습니다.") from exc
+        raise Temporary("HTTP 서버에 연결하지 못했습니다.") from exc
+    except (ConnectionError, OSError) as exc:
         raise Temporary("HTTP 서버에 연결하지 못했습니다.") from exc
 
 

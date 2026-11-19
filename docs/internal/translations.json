@@ -108,7 +108,7 @@
         "Background Execution, Session, and Context",
         "Workspace and execution environments"
       ],
-      "sha256": "f9eac98949378f256ca80720bf8eab98bc461c8a55c9b4fef7ed53ae305ee171"
+      "sha256": "407fbe6430c302ff16f4067a0851cef8a2c149974e96c35de918fb365475b719"
     },
     "ko": {
       "headings": [
@@ -120,7 +120,7 @@
         "Background Execution, Session 및 Context",
         "워크스페이스와 실행 환경"
       ],
-      "sha256": "98c639ffce027ffc2294b653c3d46e691b6d461954aa651b2327b5b4d7615dca"
+      "sha256": "c3b30adf9e6950cc386b4cd26fda8623f6e61ff53add0c25e43a653dd95f960c"
     }
   },
   "developer-guide/documentation.md": {
@@ -154,7 +154,7 @@
         "Windows build and distribution",
         "Unified and native verification"
       ],
-      "sha256": "a8b213886c5f17f7c21efb122a1f1dca40be899687aa9cfd836b48c75158d348"
+      "sha256": "895ae72fba01d821e5b8aa46917f01b97b0e264d2c2f100829b4a6b07ea20ed7"
     },
     "ko": {
       "headings": [
@@ -164,7 +164,7 @@
         "Windows 빌드 및 배포",
         "공통 검증과 운영체제별 검사"
       ],
-      "sha256": "e130445ac15c75094a6f7c5cfff81fd6ca991cf63a173713bdfc769d61ca3c90"
+      "sha256": "d313a20e4ed48748c1f050a16171d69f890c25208bc6e76c7281b3411813bbf5"
     }
   },
   "faq.md": {

@@ -33,6 +33,20 @@ aside, .workspace { background: #fff; border: 1px solid #ced8e5; border-radius: 
 }
 .job-list button:hover, .job-list button[aria-pressed="true"] { background: #e3edfc; border-color: #4673ae; }
 button:focus-visible { outline: 3px solid #2459ad; outline-offset: 2px; }
+.filters { display: grid; gap: .55rem; margin-top: .9rem; }
+.filters label { display: grid; gap: .2rem; font-size: .9rem; }
+.filters input, .filters select {
+  min-width: 0;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #7387a2;
+  border-radius: .3rem;
+  padding: .4rem .5rem;
+}
+.task-filter { max-width: 20rem; }
+.history-freshness { margin: 0 0 .75rem; }
 .job-list span, .job-list time, .muted, .node span, .dependency { color: #4a5f79; font-size: .9rem; }
 .detail-heading { display: flex; align-items: start; justify-content: space-between; gap: .75rem; overflow-wrap: anywhere; }
 .state { white-space: nowrap; background: #e6eef9; color: #1d447a; padding: .15rem .55rem; border-radius: 1rem; font-size: .85rem; }

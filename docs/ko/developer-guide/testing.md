@@ -35,3 +35,5 @@ npm run verify -- --ui --package
 Linux와 Windows에서 같은 명령으로 TypeScript, Python, 두 데스크톱 UI 및 네이티브 어댑터 계약을 확인합니다. Python이나 데스크톱 없이 검증하려면 `npm run verify -- --core-only`를 사용하세요. Linux에서는 `--ssh`를 추가해 격리된 OpenSSH와 Worker를 확인할 수 있습니다. Windows ConPTY, Job Object 및 설치 프로그램은 Windows에서 나온 결과로만 판정합니다.
 
 Tk 워크플로는 스크립트로 응답하는 모델 API에 연결해 프로젝트 등록부터 승인된 Git 병합까지 실제 Supervisor로 검증합니다. Electron 테스트는 실제 QA 명령이 실행 중일 때 앱을 강제 종료하고, 다시 열어 결과를 확인합니다. 설치된 CLI를 점검하려면 `--harness`를 추가하세요. CLI 시작, 자격 증명 유무, 인증된 모델 실행은 각각 판정합니다.
+
+검증 전용 Windows 호스트에서 `npm run verify -- --ui --package`를 실행한 뒤 `./scripts/qa/verify-windows-installer.ps1`을 실행하면 NSIS 설치본까지 확인할 수 있습니다. 임시 경로에 설치하고 동일한 Playwright 테스트를 실행한 뒤 제거합니다. Windows CI 작업에도 이 단계가 포함됩니다.

@@ -41,6 +41,10 @@ jobs:
       - run: python -m pip install -r requirements-desktop.txt
       - run: npm ci
       - run: npm run verify -- --ui --package
+      - name: Exercise the installed Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/qa/verify-windows-installer.ps1
 
   portable-without-runtime:
     runs-on: ubuntu-24.04

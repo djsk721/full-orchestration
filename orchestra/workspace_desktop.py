@@ -10,7 +10,7 @@ from tkinter import messagebox, ttk
 
 from .core import require
 from .desktop import BG, MUTED, NAV, PANEL, STATES, Desktop
-from .execution_state import LIVE, TERMINAL
+from .execution_state import LIVE, TERMINAL, merge_candidate_ready
 from .mcp import MCPClient, do_call, published
 from .observability import EVENT_LABELS, agent_rows
 from .ssh import ssh_env
@@ -245,7 +245,7 @@ class WorkspaceDesktop(ProjectSettings, RemoteWorkspace, Desktop):
         state = job["state"] if job else None
         for label, active in (("중지", state is not None and state not in TERMINAL | {"MERGING"}),
                               ("재시도", state == "FAILED"), ("도구 승인 검토", state == "AWAITING_TOOL"),
-                              ("병합 승인", state == "AWAITING_APPROVAL")):
+                              ("병합 승인", bool(job and merge_candidate_ready(job)))):
             if label in self.job_controls:
                 self.job_controls[label].state(["!disabled" if active else "disabled"])
 

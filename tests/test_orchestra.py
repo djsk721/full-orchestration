@@ -15,8 +15,9 @@ from unittest.mock import patch
 
 from orchestra.core import Invalid, atomic_json, config_check, defaults, plan_check
 from orchestra.discovery import discover, migrate, rollback
+from orchestra.gitgate import GitGate
 from orchestra.harness import workspace_path
-from orchestra.mcp import Gateway, MCPClient, virtual_name
+from orchestra.mcp import Gateway, virtual_name
 from orchestra.runtime import RuntimeClient, routes
 from orchestra.store import Store
 from orchestra.supervisor import Supervisor
@@ -61,6 +62,9 @@ class Fixture(BaseHTTPRequestHandler):
             elif method == "tools/call":
                 if msg["params"]["name"] == "mutate":
                     self.server.writes += 1
+                    if self.server.stall_write:
+                        self.server.released.wait(8)
+                        return
                     if self.server.drop_write_response:
                         self.close_connection = True
                         return
@@ -73,6 +77,11 @@ class Fixture(BaseHTTPRequestHandler):
         messages = msg["messages"]
         names = {item["function"]["name"] for item in msg.get("tools", [])}
         context = messages[1]["content"] if len(messages) > 1 else ""
+        if "provider timeout" in context:
+            self.server.inference_requests += 1
+            if self.server.inference_requests == 1:
+                self.server.released.wait(8)
+                return
         if "crash checkpoint" in context:
             self.server.stalled.set()
             self.server.released.wait(12)
@@ -117,6 +126,8 @@ def http_fixture():
     server.barrier = threading.Barrier(2)
     server.writes = 0
     server.drop_write_response = False
+    server.stall_write = False
+    server.inference_requests = 0
     server.stalled = threading.Event()
     server.released = threading.Event()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -202,8 +213,8 @@ class OrchestrationTest(unittest.TestCase):
                 result = self.poll(job, {"AWAITING_APPROVAL"})["result"]
                 self.assertFalse((self.repo / "a.txt").exists())
                 with self.assertRaises(Invalid):
-                    self.store.request(job, "merge", result["base"])
-                self.store.request(job, "merge", result["candidate"])
+                    self.store.request(job, "merge", result["base"], approval_revision=result["approval_revision"])
+                self.store.request(job, "merge", result["candidate"], approval_revision=result["approval_revision"])
                 self.poll(job, {"MERGED"})
                 self.assertEqual(git(self.repo, "rev-parse", "HEAD"), result["candidate"])
                 self.assertEqual((self.repo / "a.txt").read_text(), "A\n")
@@ -235,6 +246,8 @@ class OrchestrationTest(unittest.TestCase):
                 stale = "0" * 32
                 with self.assertRaises(Invalid):
                     self.store.request(job, "merge", candidate, approval_revision=stale)
+                with self.assertRaises(Invalid):
+                    self.store.request(job, "merge", candidate)
                 self.assertEqual(self.store.job(job)["state"], "AWAITING_APPROVAL")
                 git(self.repo, "commit", "--allow-empty", "-m", "advanced externally")
                 moved = git(self.repo, "rev-parse", "HEAD")
@@ -246,6 +259,68 @@ class OrchestrationTest(unittest.TestCase):
                                     for event in self.store.events(job)))
                 with self.assertRaises(Invalid):
                     self.store.request(job, "merge", candidate, approval_revision=result["approval_revision"])
+
+    def test_candidate_worktree_modifications_reject_approval(self):
+        with http_fixture() as (fixture, url):
+            fixture.released.set()
+            cfg = config(url)
+            plan = self.plan([task("change", "ui workflow", "developer", paths=["ui-result.txt"])],
+                             [[sys.executable, "-c", "from pathlib import Path; assert Path('ui-result.txt').is_file()"]])
+            job = self.store.submit(plan_check(plan, cfg), cfg, None)
+            with self.daemon(cfg):
+                evidence = self.poll(job, {"AWAITING_APPROVAL"})["result"]
+                candidate = self.root / "worktrees" / job / "_integration" / "ui-result.txt"
+                candidate.write_text("changed after verification", encoding="utf-8")
+                self.store.request(job, "merge", evidence["candidate"], approval_revision=evidence["approval_revision"])
+                self.poll(job, {"FAILED"})
+                self.assertEqual(git(self.repo, "rev-parse", "HEAD"), evidence["base"])
+                self.assertFalse((self.repo / "ui-result.txt").exists())
+                self.assertIn("승인된 QA 후보가 변경", self.store.events(job)[-1]["payload"]["reason"])
+
+    def test_git_worktree_preserves_unicode_space_and_long_paths(self):
+        repo = self.repo.with_name("프로젝트 with spaces")
+        self.repo.rename(repo)
+        self.repo = repo
+        git(repo, "config", "core.longpaths", "true")
+        relative = Path("하위 폴더") / ("q" * 90) / ("r" * 90) / ("s" * 90) / "테스트.txt"
+        source = repo / relative
+        self.assertGreater(len(str(source)), 260)
+        try:
+            source.parent.mkdir(parents=True)
+            source.write_text("checked", encoding="utf-8")
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) == 206:
+                self.skipTest("Windows long paths are disabled on this host")
+            raise
+        git(repo, "add", "--", relative.as_posix())
+        git(repo, "commit", "-m", "long Unicode test path")
+        plan = self.plan([task("qa", "verify files", "qa", qa=[["git", "--version"]])])
+        job = self.store.submit(plan, defaults(), None)
+        gate = GitGate(self.store, self.store.job(job), lambda: False)
+        worktree = gate.worktree("qa", gate.base())
+        self.assertEqual((worktree / relative).read_text(encoding="utf-8"), "checked")
+        self.assertEqual(gate.changed(worktree), [])
+
+    def test_provider_timeout_retries_from_managed_checkpoint(self):
+        original = RuntimeClient.request
+
+        def short_inference(client, path, data=None, timeout=60):
+            return original(client, path, data, min(timeout, .4) if data and timeout == 120 else timeout)
+
+        with http_fixture() as (fixture, url), patch.object(RuntimeClient, "request", short_inference):
+            cfg = config(url)
+            plan = self.plan([task("explore", "provider timeout")])
+            job = self.store.submit(plan_check(plan, cfg), cfg, None)
+            try:
+                with self.daemon(cfg):
+                    self.poll(job, {"SUCCEEDED"})
+                row = self.store.tasks(job)["explore"]
+                self.assertEqual(row["attempt"], 2)
+                self.assertEqual(fixture.inference_requests, 2)
+                self.assertTrue(any("시간이 초과" in item["payload"].get("reason", "")
+                                    for item in self.store.events(job) if item["event_type"] == "route.failed"))
+            finally:
+                fixture.released.set()
 
     def test_runtime_gate_and_dag_scope(self):
         with http_fixture() as (_, url):
@@ -347,6 +422,36 @@ class OrchestrationTest(unittest.TestCase):
             with self.daemon(cfg):
                 self.assertEqual(self.store.job(job)["state"], "FAILED")
             self.assertEqual(fixture.writes, 1)
+
+    def test_mcp_write_timeout_is_audited_and_never_retried(self):
+        from orchestra.mcp import http
+
+        def short_tool_call(url, data=None, headers=None, **options):
+            if data and data.get("method") == "tools/call":
+                options["timeout"] = .4
+            return http(url, data, headers, **options)
+
+        with http_fixture() as (fixture, url), patch("orchestra.mcp.http", short_tool_call):
+            fixture.stall_write = True
+            cfg = config(url)
+            cfg["mcp"]["fixture"] = {"transport": "http", "url": url + "/mcp",
+                                      "tools": {"mutate": {"access": "write", "roles": ["developer"]}}}
+            plan = self.plan([task("write", "external write", "developer", tools=[virtual_name("fixture", "mutate")])])
+            job = self.store.submit(plan_check(plan, cfg), cfg, None)
+            try:
+                with self.daemon(cfg):
+                    self.poll(job, {"AWAITING_TOOL"})
+                    [approval] = self.store.approvals(job)
+                    self.store.decide(job, approval["task"], approval["key"], True)
+                    self.poll(job, {"FAILED"})
+                self.assertEqual(fixture.writes, 1)
+                with self.assertRaises(Invalid):
+                    Store(self.root).request(job, "retry")
+                uncertain = [item for item in self.store.events(job) if item["event_type"] == "tool.call"
+                             and item["payload"]["status"] == "uncertain"]
+                self.assertEqual(len(uncertain), 1)
+            finally:
+                fixture.released.set()
 
     def test_attached_opencode_reuses_local_runtime_and_limits(self):
         from orchestra.harness import attached

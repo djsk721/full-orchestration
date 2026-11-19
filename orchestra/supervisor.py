@@ -292,6 +292,7 @@ class Supervisor:
         with process_lock(self.root / "supervisor.lock") as acquired:
             if not acquired:
                 return
+            status.unlink(missing_ok=True)
             stop_file.unlink(missing_ok=True)
             active = {}
             idle_since = time.monotonic()
@@ -318,7 +319,7 @@ class Supervisor:
                             self.store.recover(True, self.owner)
                             self.store.recover(False, self.owner)
                             self.store.expire_foreground()
-                            atomic_json(status, {"pid": os.getpid(), "at": time.time(),
+                            atomic_json(status, {"pid": os.getpid(), "at": time.time(), "owner": self.owner,
                                                  "gateway": bool(self.gateway), "gateway_error": self.gateway_error})
                         for key, (future, row, stamp) in list(active.items()):
                             if future.done():

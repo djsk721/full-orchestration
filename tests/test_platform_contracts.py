@@ -19,7 +19,7 @@ from orchestra.core import Invalid, defaults
 from orchestra import desktop_contract
 from orchestra.platform.command_line import format_commands, parse_commands
 from orchestra.harness import workspace_path
-from orchestra.platform.filesystem import path_in
+from orchestra.platform.filesystem import atomic_bytes, path_in
 from orchestra.platform.terminal import create_pty
 from orchestra.processes import run
 from orchestra.store import Store
@@ -54,6 +54,37 @@ class NativeAdapterTest(unittest.TestCase):
             with patch.object(Path, "lstat", attributes):
                 with self.assertRaises(Invalid):
                     workspace_path(root, "allowed/file.txt", ["allowed"])
+
+    @unittest.skipUnless(os.name == "nt", "requires a native Windows directory junction")
+    def test_worktree_guard_rejects_a_real_windows_junction(self):
+        with tempfile.TemporaryDirectory(prefix="orchestra-native-reparse-") as directory:
+            root = Path(directory)
+            workspace, outside = root / "workspace", root / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            junction = workspace / "allowed"
+            subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(outside)],
+                           check=True, capture_output=True)
+            try:
+                self.assertTrue(junction.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+                with self.assertRaises(Invalid):
+                    workspace_path(workspace, "allowed/file.txt", ["allowed"])
+            finally:
+                junction.rmdir()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows read-only file attributes")
+    def test_windows_atomic_save_keeps_read_only_file(self):
+        with tempfile.TemporaryDirectory(prefix="orchestra-readonly-") as directory:
+            path = Path(directory) / "settings.json"
+            path.write_bytes(b"original")
+            path.chmod(stat.S_IREAD)
+            try:
+                with self.assertRaises(PermissionError):
+                    atomic_bytes(path, b"replacement")
+                self.assertEqual(path.read_bytes(), b"original")
+                self.assertEqual(list(path.parent.iterdir()), [path])
+            finally:
+                path.chmod(stat.S_IWRITE)
 
     def test_timeout_terminates_a_real_descendant(self):
         with tempfile.TemporaryDirectory(prefix="orchestra-child-tree-") as directory:
@@ -175,6 +206,49 @@ class StateConsistencyTest(unittest.TestCase):
         self.assertIsNone(item["result"])
         self.assertIsNone(item["owner"])
         self.assertEqual(self.store.events(job)[-1]["payload"]["state"], "CANCELLED")
+
+    def test_cancel_and_completion_publish_one_terminal_state_under_contention(self):
+        job = self.store.submit(self.plan, self.config, None)
+        self.assertTrue(self.store.claim(job, "worker"))
+        self.store.set_job(job, "RUNNING", release=False)
+
+        def finish(index):
+            store = Store(self.root)
+            if index == 0:
+                try:
+                    store.request(job, "cancel")
+                    return "accepted"
+                except Invalid:
+                    return "already completed"
+            store.set_job(job, "SUCCEEDED", result={"qa": []})
+            return "released"
+
+        cancellation, _ = self.compete(finish, count=2)
+        expected = "CANCELLED" if cancellation == "accepted" else "SUCCEEDED"
+        item = self.store.job(job)
+        self.assertEqual(item["state"], expected)
+        self.assertIsNone(item["owner"])
+        terminal = [event["payload"]["state"] for event in self.store.events(job)
+                    if event["event_type"] == "job.state" and event["payload"]["state"] in ("CANCELLED", "SUCCEEDED")]
+        self.assertEqual(terminal, [expected])
+
+    def test_same_candidate_requires_current_revision_and_successful_qa(self):
+        job = self.store.submit(self.plan, self.config, None)
+        candidate = "a" * 40
+        evidence = {"candidate": candidate, "approval_revision": "1" * 32, "qa": [{"index": 1, "exit_code": 0}]}
+        self.store.set_job(job, "AWAITING_APPROVAL", result=evidence)
+        new_cycle = evidence | {"approval_revision": "2" * 32}
+        self.store.set_job(job, "AWAITING_APPROVAL", result=new_cycle)
+        for supplied in (None, evidence["approval_revision"]):
+            with self.assertRaises(Invalid):
+                self.store.request(job, "merge", candidate, approval_revision=supplied)
+        self.store.set_job(job, "AWAITING_APPROVAL", result=new_cycle | {"qa": [{"index": 1, "exit_code": 7}]})
+        with self.assertRaises(Invalid):
+            self.store.request(job, "merge", candidate, approval_revision=new_cycle["approval_revision"])
+        self.store.set_job(job, "AWAITING_APPROVAL", result=new_cycle)
+        self.store.request(job, "merge", candidate, approval_revision=new_cycle["approval_revision"])
+        [event] = [entry for entry in self.store.events(job) if entry["event_type"] == "job.request"]
+        self.assertEqual(event["payload"]["approval_revision"], new_cycle["approval_revision"])
 
     def test_concurrent_tool_approval_is_consumed_once(self):
         job = self.store.submit(self.plan, self.config, None)

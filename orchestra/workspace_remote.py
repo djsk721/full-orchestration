@@ -319,7 +319,7 @@ class RemoteWorkspace:
             return
         client = self.ssh(row["host"])
         cached = self.remote_cache.get(key, {})
-        if cached.get("error") and not reconnect:
+        if cached.get("error") and not reconnect and time.monotonic() < cached.get("retry_at", 0):
             return
         if not row["remote_job"] and not reconnect:
             return
@@ -336,7 +336,7 @@ class RemoteWorkspace:
                 page = client.call("status", job=remote_id, after=cursor)
                 return page | {"at": time.time(), "events": (previous + page["events"])[-600:]}
             except (ValueError, OSError, RuntimeError, KeyError) as exc:
-                return cached | {"error": str(exc), "at": time.time()}
+                return cached | {"error": str(exc), "retry_at": time.monotonic() + 8}
         def done(value):
             self.remote_pending.discard(key)
             self.remote_cache[key] = value

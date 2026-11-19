@@ -191,4 +191,18 @@ class SSHClient:
             raise Invalid("Remote Worker가 호환되는 응답을 반환하지 않았습니다.") from exc
         require(isinstance(value, dict) and value.get("version") == PROTOCOL, "원격 Worker 프로토콜 버전이 일치하지 않습니다.")
         require(value.get("ok"), value.get("error", "원격 Worker 요청이 거절되었습니다."))
-        return value["result"]
+        result = value["result"]
+        if method == "submit":
+            require(isinstance(result, dict) and isinstance(result.get("id"), str)
+                    and re.fullmatch(r"[a-f0-9]{32}", result["id"]), "원격 Worker가 잘못된 실행 ID를 반환했습니다.")
+        if method == "status":
+            require(isinstance(result, dict) and result.get("id") == params["job"]
+                    and isinstance(result.get("events"), list) and len(result["events"]) <= 150,
+                    "원격 Worker의 실행 ID 또는 이벤트 목록이 일치하지 않습니다.")
+            cursor = params.get("after", 0)
+            for event in result["events"]:
+                require(isinstance(event, dict) and event.get("run_id") == params["job"]
+                        and type(event.get("seq")) is int and event["seq"] > cursor,
+                        "원격 Worker 이벤트의 실행 ID 또는 순서가 일치하지 않습니다.")
+                cursor = event["seq"]
+        return result

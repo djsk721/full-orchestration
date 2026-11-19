@@ -11,6 +11,7 @@ EVENT_LABELS = {
     "task.state": "Agent 단계", "task.checkpoint": "체크포인트", "model.usage": "모델 사용량",
     "runtime.snapshot": "Runtime 검증", "harness.snapshot": "Harness 관측", "tool.call": "도구 호출",
     "tool.approval": "도구 승인 요청", "tool.decision": "도구 승인 처리", "qa.result": "QA 결과",
+    "qa.interrupted": "QA 중단",
     "git.commit": "Git 커밋", "review.result": "독립 검토 결과", "route.selected": "실행 경로", "route.failed": "경로 오류",
     "file.changed": "파일 변경", "process.activity": "CLI 활동",
 }
