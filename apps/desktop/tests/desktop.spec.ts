@@ -206,3 +206,88 @@ test("a forcibly closed Electron cannot interrupt a running Python Supervisor", 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("displays read-only KPI overview, mode filter, QA summary and responsive layouts without horizontal overflow", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "orchestra-electron-ui-"));
+  const python = process.env.PYTHON || "python";
+  let app;
+  try {
+    execFileSync(python, ["tests/legacy_fixture.py", directory]);
+    execFileSync(python, ["tests/legacy_fixture.py", directory, "--qa-failure"]);
+    execFileSync(python, [
+      "-c",
+      `import sys; from pathlib import Path
+sys.path.insert(0, str(Path("../..").resolve()))
+from orchestra.core import defaults, plan_check
+from orchestra.store import Store
+root = Path(sys.argv[1])
+store = Store(root)
+cfg = defaults()
+plan = plan_check({
+    "title": "Auth module foreground verification",
+    "repo": str((root / "fixture repo").resolve()),
+    "target": "main",
+    "background": False,
+    "tasks": [{"id": "verify", "role": "qa", "prompt": "Run checks", "acceptance": "Pass", "qa": [["git", "--version"]]}],
+    "qa": [["git", "--version"]],
+}, cfg)
+job = store.submit(plan, cfg, "fg-session")
+store.set_task(job, "verify", "SUCCEEDED", attempt=1)
+store.event(job, "verify", "qa.result", {"exit_code": 0})
+store.set_job(job, "SUCCEEDED", result={"qa": [{"index": 1, "exit_code": 0}]})`,
+      directory,
+    ]);
+    app = await launch(directory);
+    const window = await app.firstWindow();
+    await window.setViewportSize({ width: 1360, height: 860 });
+
+    await expect(window.getByText("Read-only Monitor")).toBeVisible();
+    await expect(window.getByText("Live Sync")).toBeVisible();
+    const overview = window.getByRole("region", { name: "Execution overview" });
+    await expect(overview).toBeVisible();
+    await expect(overview.getByText("3")).toBeVisible();
+
+    await expect(window.getByLabel("Execution mode")).toBeVisible();
+    await window.getByLabel("Execution mode").selectOption("foreground");
+    await expect(window.getByRole("button", { name: /Auth module foreground verification/ })).toBeVisible();
+    await expect(window.getByRole("button", { name: /Integration failure fixture/ })).toHaveCount(0);
+    await expect(window.getByRole("button", { name: /문서 verification/ })).toHaveCount(0);
+
+    await window.getByLabel("Execution mode").selectOption("background");
+    const approvalJob = window.getByRole("button", { name: /문서 verification/ });
+    await expect(approvalJob).toBeVisible();
+    await expect(window.getByRole("button", { name: /Integration failure fixture/ })).toBeVisible();
+    await expect(window.getByRole("button", { name: /Auth module foreground verification/ })).toHaveCount(0);
+
+    await approvalJob.click();
+    await expect(window.getByText("1/1 passed")).toBeVisible();
+    await expect(window.getByText("PASS", { exact: true })).toBeVisible();
+
+    await window.getByLabel("Execution mode").selectOption("");
+    await expect(window.getByRole("button", { name: /Auth module foreground verification/ })).toBeVisible();
+    if (!process.env.ORCHESTRA_PREVIEW_EXECUTABLE && process.env.ORCHESTRA_UI_HISTORY_SCREENSHOT) {
+      await window.screenshot({ path: process.env.ORCHESTRA_UI_HISTORY_SCREENSHOT });
+    }
+
+    await window.getByRole("button", { name: /Integration failure fixture/ }).click();
+    await expect(window.getByText("0/1 passed")).toBeVisible();
+    await expect(window.getByText("FAIL", { exact: true })).toBeVisible();
+    if (!process.env.ORCHESTRA_PREVIEW_EXECUTABLE && process.env.ORCHESTRA_UI_QA_SCREENSHOT) {
+      await window.screenshot({ path: process.env.ORCHESTRA_UI_QA_SCREENSHOT });
+    }
+
+    const desktopOverflow = await window.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(desktopOverflow).toBe(false);
+
+    await window.setViewportSize({ width: 760, height: 760 });
+    const narrowOverflow = await window.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(narrowOverflow).toBe(false);
+  } finally {
+    await app?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

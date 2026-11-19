@@ -26,7 +26,7 @@ PALETTE = {"black": "#1a2535", "red": "#f07883", "green": "#8cd4aa", "brown": "#
 
 
 class TerminalView(ttk.Frame):
-    def __init__(self, parent, argv, cwd=None, env=None, *, font="Consolas"):
+    def __init__(self, parent, argv, cwd=None, env=None, *, font="Consolas", palette=None):
         super().__init__(parent)
         try:
             import pyte
@@ -39,12 +39,16 @@ class TerminalView(ttk.Frame):
         self.closed = threading.Event()
         self.rendered = False
         self.tags = set()
+        self.term_bg = (palette or {}).get("terminal_bg", "#0f1724")
+        self.term_fg = (palette or {}).get("terminal_fg", "#e5edf7")
+        self.term_border = (palette or {}).get("border", "#2a364b")
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
-        self.status = ttk.Label(self, text="연결됨 · Ctrl+Shift+V 붙여넣기 · Shift+PgUp/PgDn 스크롤")
+        self.status = ttk.Label(self, text="연결됨 · Ctrl+Shift+V 붙여넣기 · Shift+PgUp/PgDn 스크롤", style="Muted.TLabel")
         self.status.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-        self.surface = tk.Text(self, bg="#0f1724", fg="#e5edf7", insertbackground="white", relief="flat",
-                               font=(font, 11), wrap="none", padx=8, pady=5, width=32, height=9,
+        self.surface = tk.Text(self, bg=self.term_bg, fg=self.term_fg, insertbackground="white", relief="flat",
+                               highlightthickness=1, highlightbackground=self.term_border,
+                               font=(font, 11), wrap="none", padx=10, pady=8, width=32, height=9,
                                state="disabled", takefocus=True)
         self.surface.grid(row=1, column=0, sticky="nsew")
         self.surface.bind("<KeyPress>", self.key)
@@ -181,7 +185,7 @@ class TerminalView(ttk.Frame):
                         def color(value, fallback):
                             import re
                             return PALETTE.get(value) or ("#" + value if re.fullmatch(r"[a-fA-F0-9]{6}", value) else fallback)
-                        self.surface.tag_configure(tag, foreground=color(fg, "#e5edf7"), background=color(bg, "#0f1724"),
+                        self.surface.tag_configure(tag, foreground=color(fg, self.term_fg), background=color(bg, self.term_bg),
                                                    underline=underline)
                         self.tags.add(tag)
                 self.surface.insert("end", "".join(parts), tag)
