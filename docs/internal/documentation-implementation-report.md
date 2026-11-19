@@ -35,7 +35,7 @@ DAG, Agent/QA 실행, Managed Harness, Git 승인, Supervisor 백그라운드 �
 | 코드 예제 및 외부 링크 | PASS | 한·영 JSON과 기존 두 예제를 앱 검증기로 검사. QA smoke의 `git --version` 정상 종료. 문서의 외부 URL 12개 모두 HTTP 200. |
 | 기존 앱 회귀 | PASS | Linux에서 `python -m unittest discover -s tests -v` 10개 통과. 기본 샌드박스는 loopback 소켓을 차단하여 허용된 실행 환경에서 재실행. |
 | 민감정보 | PASS | 스테이징한 변경을 Gitleaks 8.30.0로 검사. 스크린샷은 작업 이력이 없는 임시 폴더에서 캡처. |
-| GitHub Actions | NOT_VERIFIED | 로컬에서 동일한 빌드 단계를 통과. 문서 브랜치의 GitHub 실행 결과를 후속 기록. |
+| GitHub Actions | PASS | 문서 브랜치 push와 PR 이벤트 모두 성공. [PR 실행 및 사이트 산출물](https://github.com/djsk721/full-orchestration/actions/runs/44460311660). |
 | Pages 게시·Windows 실기·실제 외부 CLI/GPU | NOT_VERIFIED | Pages 호스팅이 설정되어 있지 않습니다. 대상 환경에서 Windows 번들, 로그인 작업 및 실제 CLI·Model 통합 실행이 필요합니다. |
 
 ## 남아 있는 항목
