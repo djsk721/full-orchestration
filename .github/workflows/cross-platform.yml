@@ -66,9 +66,13 @@ jobs:
         run: |
           npm.cmd run verify -- --package-only *>&1 |
             Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-package.log')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $verificationStatus = $LASTEXITCODE
+          $installer = Get-ChildItem -LiteralPath 'apps/desktop/release' -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path -LiteralPath ($_.FullName + '.blockmap') }
+          if ($installer) { 'installer-built=true' >> $env:GITHUB_OUTPUT }
+          if ($verificationStatus -ne 0) { exit $verificationStatus }
       - name: Exercise the installed Windows workspace and monitor
-        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows-package.outcome == 'success' }}
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows-package.outputs.installer-built == 'true' }}
         shell: pwsh
         run: |
           ./scripts/qa/verify-windows-installer.ps1 *>&1 |

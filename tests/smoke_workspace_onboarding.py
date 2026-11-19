@@ -17,7 +17,7 @@ from orchestra.workspace import read_workspace
 def exercise(output):
     with tempfile.TemporaryDirectory(prefix="orchestra-onboarding-") as temporary, http_fixture() as (_, endpoint):
         root = Path(temporary)
-        project = fixture_repo(root / "daily-project")
+        project = fixture_repo(root / "daily-project").resolve()
         data = root / "settings"
         save_registry(data, config(endpoint))
         before = (data / "registry.json").read_bytes()

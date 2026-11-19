@@ -175,7 +175,14 @@ test("a forcibly closed Electron cannot interrupt a running Python Supervisor", 
 
     const electronProcess = app.process();
     const exit = once(electronProcess, "exit");
-    expect(electronProcess.kill("SIGKILL")).toBe(true);
+    if (process.platform === "win32") {
+      // Renderer and utility processes can retain the browser profile after the
+      // parent exits. Terminate only the tree started by this Electron launch.
+      expect(electronProcess.pid).toBeDefined();
+      execFileSync("taskkill", ["/PID", String(electronProcess.pid), "/T", "/F"], { windowsHide: true });
+    } else {
+      expect(electronProcess.kill("SIGKILL")).toBe(true);
+    }
     await exit;
     app = undefined;
     writeFileSync(join(directory, "release"), "");
@@ -203,7 +210,7 @@ test("a forcibly closed Electron cannot interrupt a running Python Supervisor", 
         clearTimeout(force);
       }
     }
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 125 });
   }
 });
 
