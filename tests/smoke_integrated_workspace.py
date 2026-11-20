@@ -300,8 +300,9 @@ def workflow(window, app, store, repository, server, output, *, preferred="alter
     fields = app.workspace_tabs[job]
     app.open_workspace_job(job)
     assert fields["dag"].find_all()
-    assert "test-model" in fields["overview"].get("1.0", "end")
-    assert str(repository) in fields["overview"].get("1.0", "end")
+    overview = fields["overview"].get("1.0", "end")
+    assert "test-model" in overview
+    assert Path(overview.splitlines()[0]).samefile(repository), "wrong repository shown in the run overview"
     assert "ui-result.txt" in fields["qa"].get("1.0", "end")
     assert w("검증 {0} · 종료 코드 {1}", 1, 0).rsplit("· ", 1)[-1] in fields["qa"].get("1.0", "end")
     assert "ui-result.txt" in fields["changes"].get("1.0", "end")
