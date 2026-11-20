@@ -37,22 +37,25 @@ def native_windows():
     user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, wintypes.WPARAM]
     user32.keybd_event.restype = None
 
-    def find(pid, *, excluding=None):
+    def visible_windows(pid):
         matches = []
 
         @visitor
         def collect(hwnd, _):
             owner = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-            if owner.value == pid and hwnd != excluding and user32.IsWindowVisible(hwnd):
+            if owner.value == pid and user32.IsWindowVisible(hwnd):
                 title = ctypes.create_unicode_buffer(256)
                 user32.GetWindowTextW(hwnd, title, len(title))
-                if title.value == "Model Orchestration":
-                    matches.append(hwnd)
+                matches.append((hwnd, title.value))
             return True
 
         user32.EnumWindows(collect, 0)
-        return matches[0] if matches else None
+        return matches
+
+    def find(pid, *, excluding=None):
+        return next((hwnd for hwnd, title in visible_windows(pid)
+                     if hwnd != excluding and title == "Model Orchestration"), None)
 
     def close(hwnd):
         if not user32.PostMessageW(hwnd, 0x0010, 0, 0):  # WM_CLOSE
@@ -72,7 +75,7 @@ def native_windows():
         finally:
             user32.keybd_event(control, 0, key_up, 0)
 
-    return find, close, open_terminal
+    return find, close, open_terminal, visible_windows
 
 
 def supervisor_for(profile, owner, *, previous=None):
@@ -98,7 +101,7 @@ def local_shell(owner):
     return None
 
 
-def start_local_shell(owner, window, open_terminal):
+def start_local_shell(owner, window, open_terminal, visible_windows):
     next_shortcut = 0.0
 
     def probe():
@@ -111,11 +114,16 @@ def start_local_shell(owner, window, open_terminal):
             next_shortcut = time.monotonic() + 5
         return None
 
-    return wait_for(probe, "the packaged Tk workspace did not start its local shell")
+    try:
+        return wait_for(probe, "the packaged Tk workspace did not start its local shell")
+    except AssertionError:
+        print(f"Tk windows after shortcut: {[title for _, title in visible_windows(owner.pid)]}", flush=True)
+        print(f"Tk child processes after shortcut: {[child.name() for child in owner.children()]}", flush=True)
+        raise
 
 
 def exercise(binary, profile, *, open_terminal):
-    find_window, close_window, open_local_terminal = native_windows()
+    find_window, close_window, open_local_terminal, visible_windows = native_windows()
     env = os.environ | {"ORCHESTRA_DATA": str(profile)}
     env.pop("ORCHESTRA_LANG", None)
     app = subprocess.Popen([str(binary)], env=env)
@@ -133,7 +141,7 @@ def exercise(binary, profile, *, open_terminal):
         status = profile / "supervisor.json"
         print(f"Tk first-run and packaged Supervisor startup PASS (PID {first.pid})", flush=True)
         if open_terminal:
-            terminal = start_local_shell(owner, window, open_local_terminal)
+            terminal = start_local_shell(owner, window, open_local_terminal, visible_windows)
             owned.append(terminal)
             print(f"Packaged local terminal startup PASS (PowerShell PID {terminal.pid})", flush=True)
 

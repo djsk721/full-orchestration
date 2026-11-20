@@ -1040,4 +1040,6 @@ def launch(root):
     WorkspaceDesktop(window, root, startup_locale=locale)
     if locale:
         window.deiconify()
+        # The language chooser owned keyboard focus before it was destroyed.
+        window.after_idle(window.focus_set)
     window.mainloop()
