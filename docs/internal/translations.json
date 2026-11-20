@@ -108,7 +108,7 @@
         "Background Execution, Session, and Context",
         "Workspace and execution environments"
       ],
-      "sha256": "407fbe6430c302ff16f4067a0851cef8a2c149974e96c35de918fb365475b719"
+      "sha256": "a75ce5e627d3622e1cc83325e9485316999f3e9df80d35f769ed0d202369ae1f"
     },
     "ko": {
       "headings": [
@@ -120,7 +120,7 @@
         "Background Execution, Session 및 Context",
         "워크스페이스와 실행 환경"
       ],
-      "sha256": "c3b30adf9e6950cc386b4cd26fda8623f6e61ff53add0c25e43a653dd95f960c"
+      "sha256": "29fe9fc0061d1d92ad8b8f7fce62fb57eff6bd9a4e269bb7446a15217050c043"
     }
   },
   "developer-guide/documentation.md": {
