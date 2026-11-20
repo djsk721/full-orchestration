@@ -405,7 +405,7 @@ ADMIN_EN = {
     "작업 실행 기록이 생성되면 Agent 상태가 표시됩니다.": "Agents appear after a run is recorded.",
     "작업을 선택하세요.": "Select a job.",
     "{0} · {1} · 이 PC": "{0} · {1} · This PC",
-    "Provider {0}   모델 {1}   Runtime {2}": "Provider {0}   Model {1}   Runtime {2}",
+    "요청 Provider {0}   모델 {1}   Runtime {2}": "Requested provider {0}   Model {1}   Runtime {2}",
     "시작 {0}  ·  경과 {1}  ·  재시도 {2}  ·  도구 {3}회": "Started {0}  ·  Elapsed {1}  ·  Retries {2}  ·  Tool calls {3}",
     "입력 {0}  ·  출력 {1}  ·  최근 Prompt 토큰 {2}  ·  검증된 Context 한도 {3}": "Input {0}  ·  Output {1}  ·  Last prompt tokens {2}  ·  Verified context limit {3}",
     "변경 파일 {0}": "Changed files {0}",

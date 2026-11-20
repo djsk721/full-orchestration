@@ -17,7 +17,7 @@ from .execution_state import MERGE_EVIDENCE, TERMINAL, merge_candidate_ready
 from .observability import EVENT_LABELS, agent_rows
 from .supervisor import read_config
 from .ui import state_label
-from .workspace import read_workspace, scan_clis
+from .workspace import format_commands, read_workspace, scan_clis
 
 
 INTERACTIVE_CLIS = ("OpenCode", "Codex", "Gemini CLI", "Antigravity", "Claude Code")
@@ -444,12 +444,14 @@ class IntegratedWorkspace:
         model = self.workspace_selected_model(self.project_id)
         self.action(lambda: self.guided_dialog(preferred_model=model))
 
-    def workspace_open_ai(self, name):
+    def workspace_open_ai(self, name, model=None):
         project = self.project_rows().get(self.project_id, {})
         require(not project.get("host"), self.w("원격 CLI는 SSH 셸에서 설치 상태와 작업 디렉터리를 확인한 뒤 실행하세요."))
-        model = self.workspace_selected_model(self.project_id)
-        selected = model if model in self.available_terminal_models(name) else None
-        self.open_ai_terminal(name, project_id=self.project_id, model=selected)
+        if model is None and name != "OpenCode":
+            preferred = self.workspace_selected_model(self.project_id)
+            if preferred in self.available_terminal_models(name):
+                model = preferred
+        self.open_ai_terminal(name, project_id=self.project_id, model=model)
 
     def workspace_terminal_menu(self, anchor=None):
         menu = tk.Menu(self.window, tearoff=False)
@@ -462,6 +464,12 @@ class IntegratedWorkspace:
         for name in INTERACTIVE_CLIS:
             note = "" if paths.get(name) else self.w(" · 설치 미탐지")
             cli.add_command(label=name + note, command=lambda pick=name: self.action(lambda: self.workspace_open_ai(pick)))
+        if (options := self.available_terminal_models("OpenCode")) and not project.get("host"):
+            opencode = tk.Menu(cli, tearoff=False)
+            for key, option in options.items():
+                opencode.add_command(label=f"{key} · {option.identifier}",
+                                     command=lambda pick=key: self.action(lambda: self.workspace_open_ai("OpenCode", pick)))
+            cli.add_cascade(label=self.w("OpenCode 시작 모델"), menu=opencode)
         menu.add_cascade(label="AI CLI", menu=cli)
         ssh = tk.Menu(menu, tearoff=False)
         for key, profile in read_workspace(self.root)["hosts"].items():
@@ -484,8 +492,9 @@ class IntegratedWorkspace:
         if session and not session.archived:
             models = tk.Menu(menu, tearoff=False)
             for name in dict.fromkeys(recipe.profile for recipe in session.recipes if recipe.kind == "ai"):
-                for key, (provider, actual) in self.available_terminal_models(name).items():
-                    models.add_command(label=f"{name} · {provider} / {actual}",
+                for key, option in self.available_terminal_models(name).items():
+                    label = option.identifier if name == "OpenCode" else f"{option.provider} / {option.identifier}"
+                    models.add_command(label=f"{name} · {label}",
                                        command=lambda cli=name, model=key: self.action(lambda: self.change_terminal_model(cli, model)))
             if models.index("end") is not None:
                 menu.add_cascade(label=self.w("모델을 변경해 다시 열기"), menu=models)
@@ -1106,9 +1115,11 @@ class IntegratedWorkspace:
             if action in view["controls"]:
                 view["controls"][action].state(["!disabled" if enabled else "disabled"])
         mode = self.w("독립 백그라운드 실행") if job["plan"].get("background") else self.w("앱 연결 실행")
-        overview = [self.w("대상 브랜치  {0}", job["plan"]["target"]), self.w("실행 ID  {0}", key), mode, ""]
-        overview.extend(f'{item["id"]} · {item["role"]} · {state_label(item["state"], self.locale)}'
-                        for item in agent_rows(job, tasks, events))
+        overview = [job["plan"]["repo"], self.w("대상 브랜치  {0}", job["plan"]["target"]), self.w("실행 ID  {0}", key), mode, ""]
+        for item in agent_rows(job, tasks, events):
+            stage = f'{item["id"]} · {item["role"]} · {state_label(item["state"], self.locale)}'
+            route = [item["provider_requested"] or item["provider"], item["model_requested"] or item["model"], item["harness"]]
+            overview.append(" · ".join([stage, *(value for value in route if value)]))
         if error:
             overview.append(self.workspace_error(error))
         self.workspace_write(view["overview"], "\n".join(overview))
@@ -1123,6 +1134,8 @@ class IntegratedWorkspace:
         interruptions = [item for item in events if item["event_type"] in ("qa.result", "qa.interrupted")]
         if candidate:
             current_qa.append(self.w("후보 {0}", candidate))
+        if job["plan"].get("qa"):
+            current_qa.insert(0, format_commands(job["plan"]["qa"]))
         self.workspace_write(view["qa"], "\n".join([*current_qa,
                              "", self.w("최근 QA 이벤트 (병합 승인 근거는 승인 화면에서 확인)"),
                              self.workspace_event_lines(interruptions, payload=True) or self.w("기록 없음")]))

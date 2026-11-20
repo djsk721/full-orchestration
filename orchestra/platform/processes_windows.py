@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from ..core import Invalid
+from .process_control import WINDOWS_EXECUTABLE_SUFFIXES
 
 from ctypes import wintypes as w
 
@@ -110,6 +111,6 @@ def detached_options():
 
 
 def validate_executable(path):
-    if Path(path).suffix.lower() not in (".exe", ".com"):
+    if Path(path).suffix.lower() not in WINDOWS_EXECUTABLE_SUFFIXES:
         raise Invalid("Windows에서는 .exe 실행 파일을 사용하세요. Python 스크립트는 python.exe를 통해 실행할 수 있습니다.")
     return path

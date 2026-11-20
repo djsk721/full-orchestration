@@ -63,6 +63,7 @@ if (args.has("--ssh")) {
 if (args.has("--harness")) {
   run("Optional installed Harness startup and authentication inventory", python, ["scripts/qa/harness_inventory.py"]);
   run("Installed OpenCode with a scripted loopback API", python, ["tests/smoke_installed_opencode.py"]);
+  run("Multi-agent Supervisor pipeline with installed OpenCode and loopback models", python, ["tests/smoke_multi_agent_orchestration.py"]);
 }
 if (args.has("--package") || args.has("--package-only")) {
   const packaging = desktopPackage(root);

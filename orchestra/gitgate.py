@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from .core import Invalid, Stopped, path_in, require
-from .execution_state import integration_qa_passed
+from .execution_state import candidate_qa_passed
 from .processes import env_for_process, run
 
 
@@ -92,7 +92,7 @@ class GitGate:
                     "elapsed_sec": round(time.monotonic() - start, 3),
                 }, route)
                 raise
-            record = {"index": i, "exit_code": code, "elapsed_sec": round(time.monotonic() - start, 3)}
+            record = {"index": i, "exit_code": code, "commit": before, "elapsed_sec": round(time.monotonic() - start, 3)}
             self.store.event(self.job["id"], task, "qa.result", record, route)
             require(code == 0, f"QA 명령 {i} 실패 (종료 코드 {code}).")
             require(self.head(path) == before and not self.changed(path), "QA 명령이 Git 변경을 만들었습니다.")
@@ -111,7 +111,8 @@ class GitGate:
         ref = self.ref()
         candidate = result["candidate"]
         path = self.root / "_integration"
-        require(self.head(path) == candidate and integration_qa_passed(result.get("qa")) and not self.changed(path),
+        checks = result.get("qa")
+        require(self.head(path) == candidate and candidate_qa_passed(checks, candidate) and not self.changed(path),
                 "승인된 QA 후보가 변경되었습니다.")
         current = self.base()
         if current == candidate:

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .core import Invalid, Stopped, Temporary, digest, require, settings
+from .core import Invalid, Stopped, Temporary, digest, opencode_model_provider, require, settings
 from .processes import Child, env_for_process
 
 
@@ -29,8 +29,40 @@ class Route:
         return {"model_id": self.model_id, "runtime_id": self.runtime_id, "harness_id": self.harness_id,
                 "agent_id": task["role"] + "/" + task["id"], "worktree_id": task["id"]}
 
+    def requested_model(self):
+        if self.harness["kind"] == "managed":
+            return self.model["model"]
+        if self.harness["kind"] == "opencode" and self.runtime:
+            return "orchestralocal/" + self.model["model"]
+        return self.model.get("cli_model", self.model["model"])
 
-def routes(config, task):
+
+def attached_route_issue(route, task):
+    harness = route.harness
+    kind = harness["kind"]
+    if not harness.get("trusted"):
+        return "승인된 Attached CLI 실행 파일이 필요합니다."
+    if task.get("tools"):
+        return "MCP 도구가 필요한 작업에는 Managed Harness를 선택하세요."
+    if task.get("paths") and not (kind == "opencode" and route.runtime and harness.get("allow_write")):
+        return "쓰기 작업에는 Managed 또는 쓰기가 승인된 로컬 OpenCode 경로를 선택하세요."
+    if not route.runtime and not harness.get("allow_unverified"):
+        return "Attached CLI 프로필에서 확인되지 않은 Runtime 사용을 승인하세요."
+    if kind == "codex" and route.runtime:
+        return "Codex 로컬 Runtime 연결은 현재 지원되지 않습니다."
+    if kind == "opencode":
+        if route.runtime and route.runtime.get("auth_env"):
+            return "OpenCode 로컬 경로에는 Runtime 인증을 사용하지 않는 주소가 필요합니다."
+        if not opencode_model_provider(route.requested_model()):
+            return "OpenCode 모델 ID를 provider/model 형식으로 설정하세요."
+    if kind == "codex":
+        model = route.requested_model()
+        if not isinstance(model, str) or not model.strip() or model.startswith("-") or "\0" in model:
+            return "Codex 모델 ID를 확인하세요."
+    return None
+
+
+def routes(config, task, *, rejected=None):
     options = []
     for name, model in config["models"].items():
         if task.get("model", name) != name or task["role"] not in model.get("roles", [task["role"]]):
@@ -39,18 +71,19 @@ def routes(config, task):
         runtime = config["runtimes"].get(runtime_id)
         if runtime and runtime.get("context", 32768) < task.get("min_context", 1024):
             continue
-        for harness_id in model.get("harnesses", ["managed"]):
+        for harness_id in dict.fromkeys(model.get("harnesses", ["managed"])):
             if task.get("harness", harness_id) != harness_id:
                 continue
             harness = config["harnesses"][harness_id]
-            if harness["kind"] != "managed" and not harness.get("trusted"):
-                continue
-            if task.get("tools") and harness["kind"] != "managed":
+            route = Route(name, runtime_id, harness_id, model, runtime, harness)
+            if harness["kind"] != "managed" and (reason := attached_route_issue(route, task)):
+                if rejected is not None:
+                    rejected.append(reason)
                 continue
             score = (model.get("quality", 0) * 3 + model.get("reliability", 0) * 2
                      + model.get("tool_score", 0) * int(bool(task.get("tools") or task.get("paths"))) * 2
                      - model.get("cost", 0))
-            options.append((-score, name, harness_id, Route(name, runtime_id, harness_id, model, runtime, harness)))
+            options.append((-score, name, harness_id, route))
     return [row[-1] for row in sorted(options)]
 
 

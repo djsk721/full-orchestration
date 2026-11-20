@@ -126,9 +126,12 @@ class NativeAdapterTest(unittest.TestCase):
 
     def test_native_terminal_inputs_and_resizes_interactive_process(self):
         with tempfile.TemporaryDirectory(prefix="orchestra-adapter-pty-") as directory:
-            child = ("import os; print('\\x1b[32mREADY\\x1b[0m',flush=True); "
+            child = ("import os; "
+                     "assert os.name != 'posix' or os.environ.get('PWD') == os.getcwd(); "
+                     "print('\\x1b[32mREADY\\x1b[0m',flush=True); "
                      "value=input(); size=os.get_terminal_size(); print(f'RECEIVED:{value}:{size.columns}:{size.lines}',flush=True)")
-            terminal = create_pty([sys.executable, "-c", child], Path(directory), os.environ.copy(), 25, 80)
+            env = os.environ | {"PWD": str(Path(directory) / "stale-parent")}
+            terminal = create_pty([sys.executable, "-c", child], Path(directory), env, 25, 80)
             received = queue.Queue()
 
             def read():
@@ -242,6 +245,12 @@ class StateConsistencyTest(unittest.TestCase):
         for supplied in (None, evidence["approval_revision"]):
             with self.assertRaises(Invalid):
                 self.store.request(job, "merge", candidate, approval_revision=supplied)
+        self.store.set_job(job, "AWAITING_APPROVAL", result=new_cycle | {"approval_revision": None})
+        with self.assertRaises(Invalid):
+            self.store.request(job, "merge", candidate)
+        self.store.set_job(job, "AWAITING_APPROVAL", result=new_cycle | {"qa": [{"index": 1, "exit_code": 0, "commit": "b" * 40}]})
+        with self.assertRaises(Invalid):
+            self.store.request(job, "merge", candidate, approval_revision=new_cycle["approval_revision"])
         self.store.set_job(job, "AWAITING_APPROVAL", result=new_cycle | {"qa": [{"index": 1, "exit_code": 7}]})
         with self.assertRaises(Invalid):
             self.store.request(job, "merge", candidate, approval_revision=new_cycle["approval_revision"])

@@ -1,6 +1,5 @@
 # Providers and models
 
-
 Start with the [Provider setup wizard](workspace.md) for guided registration. The JSON steps below use **Settings → Advanced JSON**.
 <!-- feature: providers PARTIALLY_IMPLEMENTED -->
 

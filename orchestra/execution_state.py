@@ -17,12 +17,18 @@ def integration_qa_passed(checks):
         for check in checks)
 
 
+def candidate_qa_passed(checks, candidate):
+    return integration_qa_passed(checks) and all(check.get("commit", candidate) == candidate for check in checks)
+
+
 def merge_candidate_ready(job):
     result = job.get("result") or {}
     candidate = result.get("candidate")
+    revision = result.get("approval_revision")
     return (job["state"] == "AWAITING_APPROVAL" and isinstance(candidate, str)
             and re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", candidate) is not None
-            and integration_qa_passed(result.get("qa")))
+            and isinstance(revision, str) and bool(revision)
+            and candidate_qa_passed(result.get("qa"), candidate))
 
 
 def task_stage(job_state, state):

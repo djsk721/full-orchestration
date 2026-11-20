@@ -3,6 +3,9 @@ from contextlib import contextmanager
 import os
 
 
+WINDOWS_EXECUTABLE_SUFFIXES = (".exe", ".com")
+
+
 def process_backend():
     if os.name == "nt":
         from . import processes_windows

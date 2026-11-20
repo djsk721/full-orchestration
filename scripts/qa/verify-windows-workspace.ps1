@@ -3,7 +3,9 @@ param(
     [int]$ExpectedDpi,
     [string]$ScreenshotDirectory,
     [switch]$WorkspaceOnly,
-    [switch]$Benchmark
+    [switch]$Benchmark,
+    [int]$BenchmarkRounds = 1,
+    [switch]$ProfileBenchmark
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +21,8 @@ $argsForSmoke = @('tests/smoke_windows_workspace.py')
 if ($ExpectedDpi) { $argsForSmoke += @('--expected-dpi', "$ExpectedDpi") }
 if ($ScreenshotDirectory) { $argsForSmoke += @('--screenshots', $ScreenshotDirectory) }
 if ($Benchmark) { $argsForSmoke += '--benchmark' }
+if ($ProfileBenchmark) { $argsForSmoke += '--profile-benchmark' }
+if ($Benchmark -or $ProfileBenchmark) { $argsForSmoke += @('--benchmark-rounds', "$BenchmarkRounds") }
 
 Push-Location $root
 try {

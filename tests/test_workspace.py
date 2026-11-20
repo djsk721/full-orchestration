@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from orchestra.core import Invalid, defaults, path_in
 from orchestra.observability import agent_rows
@@ -17,7 +18,8 @@ from orchestra.remote import PROTOCOL, dispatch, register_project
 from orchestra.ssh import SSHClient, fingerprint, pinned_key, ssh_arguments, trust_key, validate_profile
 from orchestra.store import Store
 from orchestra.terminal import Pty
-from orchestra.workspace import STRATEGIES, draft_plan, inspect_project, plan_routes, put_project, save_registry
+from orchestra.workspace import STRATEGIES, add_setup_profile, draft_plan, inspect_project, plan_routes, put_project, save_registry, scan_clis
+from orchestra.workspace_sessions import Recipe, WorkspaceSessions
 
 
 def init_repo(path):
@@ -27,6 +29,120 @@ def init_repo(path):
     subprocess.run(["git", "-C", str(path), "add", "checked.txt"], check=True)
     subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture",
                     "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], check=True)
+
+
+class CliDiscoveryTest(unittest.TestCase):
+    def test_windows_cli_discovery_selects_native_executables_instead_of_shims(self):
+        paths = {
+            "codex": r"C:\shims\codex.cmd",
+            "codex.exe": r"C:\native\codex.exe",
+            "opencode": r"C:\shims\opencode.cmd",
+            "opencode.exe": r"C:\shims\opencode.exe.cmd",
+            "antigravity.com": r"C:\native\antigravity.com",
+        }
+        with patch.object(sys, "platform", "win32"), patch("orchestra.workspace.shutil.which", side_effect=paths.get):
+            discovered = scan_clis()
+        self.assertEqual(discovered["Codex"], paths["codex.exe"])
+        self.assertIsNone(discovered["OpenCode"])
+        self.assertEqual(discovered["Antigravity"], paths["antigravity.com"])
+
+    def test_posix_cli_discovery_accepts_an_executable_script(self):
+        script = "/fixture/bin/opencode"
+        with patch.object(sys, "platform", "linux"), patch("orchestra.workspace.shutil.which", side_effect={
+            "opencode": script,
+        }.get):
+            self.assertEqual(scan_clis()["OpenCode"], script)
+
+    @unittest.skipUnless(sys.platform == "win32", "requires Windows PATH and PATHEXT semantics")
+    def test_native_windows_cli_discovery_with_a_shim_directory_first(self):
+        with tempfile.TemporaryDirectory(prefix="orchestra-cli-discovery-") as directory:
+            root = Path(directory)
+            shims, native = root / "shims", root / "native"
+            shims.mkdir()
+            native.mkdir()
+            (shims / "codex.cmd").touch()
+            (shims / "opencode.cmd").touch()
+            codex = native / "codex.exe"
+            codex.touch()
+            with patch.dict(os.environ, {"PATH": os.pathsep.join(map(str, (shims, native))),
+                                        "PATHEXT": ".CMD;.EXE;.COM"}):
+                discovered = scan_clis()
+            self.assertEqual(Path(discovered["Codex"]), codex)
+            self.assertIsNone(discovered["OpenCode"])
+
+
+class TerminalModelTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.terminal = WorkspaceSessions()
+        self.terminal.root = self.root
+        self.terminal.project_rows = lambda: {"project": {"path": str(self.root)}}
+        self.terminal.w = lambda message, *args: message.format(*args)
+        cfg = defaults()
+        cfg["harnesses"].update({
+            "opencode": {"kind": "opencode", "executable": "trusted-opencode", "trusted": True},
+            "other-opencode": {"kind": "opencode", "executable": "untrusted-opencode"},
+            "codex": {"kind": "codex", "executable": "codex"},
+        })
+        cfg["runtimes"]["runtime-fixture"] = {"kind": "llama.cpp"}
+        attached = {"provider": "subscription", "harnesses": ["opencode"]}
+        cfg["models"].update({
+            "selected": attached | {"model": "openai/fixture-model"},
+            "invalid": attached | {"model": "--prompt"},
+            "untrusted": {"provider": "subscription", "model": "openai/other", "harnesses": ["other-opencode"]},
+            "runtime": attached | {"model": "openai/ignored", "cli_model": "openai/ignored", "runtime": "runtime-fixture"},
+            "codex-model": {"provider": "subscription", "model": "existing-codex-model", "harnesses": ["codex"]},
+        })
+        save_registry(self.root, cfg)
+
+    def test_only_trusted_attached_provider_qualified_opencode_models_are_offered(self):
+        models = self.terminal.available_terminal_models("OpenCode")
+        self.assertEqual(list(models), ["selected"])
+        self.assertEqual(models["selected"].provider, "openai")
+        self.assertEqual(models["selected"].identifier, "openai/fixture-model")
+        self.assertEqual(models["selected"].executable, "trusted-opencode")
+
+    def test_opencode_argv_preserves_exact_model_executable_and_profile(self):
+        recipe = Recipe("ai", "project", "OpenCode", "selected")
+        for version, mode in ((b"1.19.5\n", []), (b"opencode v2.2.7\n", ["mini", "--standalone"])):
+            with self.subTest(version=version), \
+                    patch("orchestra.workspace_sessions.executable", side_effect=lambda path: path), \
+                    patch("orchestra.workspace_sessions.run", return_value=(0, version)) as probe, \
+                    patch("orchestra.workspace_sessions.scan_clis", side_effect=AssertionError):
+                argv, cwd, env = self.terminal._terminal_args(recipe)
+                self.assertEqual(argv, ["trusted-opencode", *mode, "--model", "openai/fixture-model"])
+                self.assertEqual(cwd, self.root)
+                self.assertIsNone(env)
+                self.assertEqual(probe.call_args.args, (["trusted-opencode", "--version"],))
+
+    def test_unavailable_opencode_selection_fails_without_using_a_default(self):
+        with patch("orchestra.workspace_sessions.scan_clis", side_effect=AssertionError):
+            with self.assertRaises(Invalid):
+                self.terminal._terminal_args(Recipe("ai", "project", "OpenCode", "untrusted"))
+            with patch("orchestra.workspace_sessions.executable", return_value="trusted-opencode"), \
+                    patch("orchestra.workspace_sessions.run", return_value=(0, b"opencode v3.0.0\n")):
+                with self.assertRaises(Invalid):
+                    self.terminal._terminal_args(Recipe("ai", "project", "OpenCode", "selected"))
+
+    def test_setup_requires_the_complete_opencode_model_reference(self):
+        cfg = defaults()
+        form = {"kind": "OpenCode", "id": "openai-test", "model": "bare-model",
+                "trusted": True, "executable": "known-opencode"}
+        with patch("orchestra.processes.executable", return_value="known-opencode"):
+            with self.assertRaisesRegex(Invalid, "provider/model"):
+                add_setup_profile(cfg, form)
+            registered = add_setup_profile(cfg, form | {"model": "openai/fixture-model"})
+        self.assertEqual(registered["models"]["openai-test"]["model"], "openai/fixture-model")
+        self.assertEqual(cfg, defaults())
+
+    def test_codex_keeps_the_existing_model_flag_and_path_selection(self):
+        with patch("orchestra.workspace_sessions.scan_clis", return_value={"Codex": "codex-on-path"}), \
+                patch("orchestra.workspace_sessions.executable", side_effect=lambda path: path), \
+                patch("orchestra.workspace_sessions.run", side_effect=AssertionError):
+            argv, _, _ = self.terminal._terminal_args(Recipe("ai", "project", "Codex", "codex-model"))
+        self.assertEqual(argv, ["codex-on-path", "--model", "existing-codex-model"])
 
 
 class WorkspaceTest(unittest.TestCase):

@@ -379,7 +379,7 @@
         "Troubleshooting",
         "Advanced settings"
       ],
-      "sha256": "ce1a8769bd6320e93f7f28f1e03cae77777b5ef68384d502711015ba31cd4af8"
+      "sha256": "ffc06e198feafdc541b56274e77f4de864fd79141288b494555a5354a19aa067"
     },
     "ko": {
       "headings": [
@@ -390,7 +390,7 @@
         "오류 해결",
         "고급 설정"
       ],
-      "sha256": "4eef8e2c4de99b8a4ffd9913ae4573fa4113aeedf61d97f66813cc3505aedbce"
+      "sha256": "8dd58fa97c073271f6986f27884b1e14561bf41fe60272678c47278a5db1a2b9"
     }
   },
   "user-guide/workspace.md": {

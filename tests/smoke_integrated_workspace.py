@@ -72,8 +72,14 @@ def terminal_fixture(name, path):
     path.write_text(f"""#!{sys.executable}
 import os
 import pathlib
+import sys
+if sys.argv[1:] == ["--version"]:
+    print("opencode v2.2.7")
+    raise SystemExit(0)
 print("\\033[2J\\033[H\\033[36m{name} · test fixture\\033[0m", flush=True)
 print("Project: " + pathlib.Path.cwd().name, flush=True)
+if "--model" in sys.argv:
+    print("Model: " + sys.argv[sys.argv.index("--model") + 1], flush=True)
 print("Interactive terminal ready. Type a line to echo it.", flush=True)
 while True:
     try:
@@ -294,6 +300,9 @@ def workflow(window, app, store, repository, server, output, *, preferred="alter
     fields = app.workspace_tabs[job]
     app.open_workspace_job(job)
     assert fields["dag"].find_all()
+    assert "test-model" in fields["overview"].get("1.0", "end")
+    assert str(repository) in fields["overview"].get("1.0", "end")
+    assert "ui-result.txt" in fields["qa"].get("1.0", "end")
     assert w("검증 {0} · 종료 코드 {1}", 1, 0).rsplit("· ", 1)[-1] in fields["qa"].get("1.0", "end")
     assert "ui-result.txt" in fields["changes"].get("1.0", "end")
     frame = fields["frame"]
@@ -334,13 +343,19 @@ def run_test(args):
         second_id = put_project(data, inspect_project(other) | {"name": "Second project"})
         registry = config(url)
         registry["models"]["alternative"] = dict(registry["models"]["model"])
-        save_registry(data, registry)
-        store = Store(data)
         errors = []
         fixture_cli = {}
         if os.name != "nt":
             fixture_cli = {tool: terminal_fixture(tool, root / executable) for tool, executable in
                            (("OpenCode", "opencode"), ("Codex", "codex"))}
+            registry["harnesses"]["terminal-opencode"] = {
+                "kind": "opencode", "executable": fixture_cli["OpenCode"], "trusted": True,
+            }
+            registry["models"]["terminal-fixture"] = {
+                "provider": "subscription", "model": "fixture/selected-model", "harnesses": ["terminal-opencode"],
+            }
+        save_registry(data, registry)
+        store = Store(data)
         with patch("orchestra.workspace_sessions.scan_clis", return_value=fixture_cli), \
                 patch("tkinter.messagebox.askyesno", return_value=True), \
                 patch("tkinter.messagebox.showerror", side_effect=lambda title, msg, **_: errors.append((title, msg))):
@@ -426,7 +441,8 @@ def exercise(args, window, app, store, root, repository, first_id, second_id, se
     app.workspace_model_picker.set(model)
     app.workspace_choose_model()
     if os.name != "nt":
-        opencode = app.open_ai_terminal("OpenCode")
+        app.workspace_open_ai("OpenCode", "terminal-fixture")
+        opencode = app.terminal_book.select()
         codex = app.open_ai_terminal("Codex")
         assert opencode != codex
         first = app.terminals[opencode][1][0]
@@ -439,7 +455,12 @@ def exercise(args, window, app, store, root, repository, first_id, second_id, se
         assert app.project_id == second_id
         app.select_workspace_project(first_id)
         app.focus_terminal(opencode)
-        wait(window, lambda: "OpenCode" in terminal_text(first), "OpenCode fixture did not start")
+        wait(window, lambda: "Model: fixture/selected-model" in terminal_text(first),
+             "OpenCode did not render its configured startup model")
+        assert app.terminal_tabs[opencode].args[0][0][1:] == ["mini", "--standalone", "--model", "fixture/selected-model"]
+        assert "fixture/selected-model" in app.workspace_runtime_status.cget("text")
+        app.workspace_open_ai("OpenCode", "terminal-fixture")
+        assert app.terminal_book.select() == opencode and app.terminal_tabs[opencode].views[0] is first
         assert any(name.startswith("colors_cyan") for name in first.surface.tag_names())
         first.send("한국어 확인")
         wait(window, lambda: "한국어 확인" in terminal_text(first), "Korean PTY input was not rendered")

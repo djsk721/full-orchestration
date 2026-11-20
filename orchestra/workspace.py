@@ -4,13 +4,14 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sys
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from .core import atomic_bytes, atomic_json, config_check, digest, ident, plan_check, require
+from .core import atomic_bytes, atomic_json, config_check, digest, ident, opencode_model_provider, plan_check, require
 from .platform import command_line
-from .platform.process_control import process_lock
+from .platform.process_control import WINDOWS_EXECUTABLE_SUFFIXES, process_lock
 from .processes import env_for_process, run
 from .runtime import RuntimeClient, routes
 from .ssh import validate_profile
@@ -202,15 +203,23 @@ def plan_routes(plan, config):
         if task["role"] == "qa" and task.get("qa") and not ({"model", "harness"} & task.keys()):
             result[task["id"]] = []
         else:
-            candidates = routes(config, task)
-            require(candidates, f'{task["id"]}: 가능한 모델·Harness 실행 경로를 찾을 수 없습니다.')
+            rejected = []
+            candidates = routes(config, task, rejected=rejected)
+            reason = rejected[0] if rejected else "가능한 모델·Harness 실행 경로를 찾을 수 없습니다."
+            require(candidates, f'{task["id"]}: {reason}')
             result[task["id"]] = [f"{route.model_id} / {route.harness_id}" for route in candidates]
     return result
 
 
 def scan_clis():
-    return {name: next((path for exe in candidates if (path := shutil.which(exe))), None)
-            for name, candidates in CLI_NAMES.items()}
+    windows = sys.platform == "win32"
+    extensions = WINDOWS_EXECUTABLE_SUFFIXES if windows else ("",)
+    result = {}
+    for name, candidates in CLI_NAMES.items():
+        paths = (shutil.which(candidate + extension) for candidate in candidates for extension in extensions)
+        result[name] = next((path for path in paths if path and
+                             (not windows or Path(path).suffix.lower() in extensions)), None)
+    return result
 
 
 def discover_models(kind, endpoint, auth_ref=""):
@@ -240,6 +249,9 @@ def add_setup_profile(config, form, model=None):
     config = json.loads(json.dumps(config))
     require(key not in config["models"], "이미 사용 중인 모델 프로필 ID입니다.")
     kind = form["kind"]
+    selected = model if model is not None else form["model"]
+    if kind == "OpenCode":
+        require(opencode_model_provider(selected), "OpenCode의 모델 ID를 provider/model 형식으로 입력하세요.")
     provider_key = "local" if kind in RUNTIME_KINDS else "subscription"
     config["providers"].setdefault(provider_key, {"kind": "local" if provider_key == "local" else "attached"})
     if kind in RUNTIME_KINDS:
@@ -265,6 +277,5 @@ def add_setup_profile(config, form, model=None):
         config["harnesses"][key] = {"kind": kind.lower(), "executable": path,
                                      "trusted": True, "allow_unverified": True}
         route = {"harnesses": [key], "roles": ["explorer", "reviewer", "planner", "diagnostic"]}
-    selected = model if model is not None else form["model"]
     config["models"][key] = {"provider": provider_key, "model": selected, **route}
     return config_check(config)

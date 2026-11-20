@@ -3,18 +3,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
+import sys
 from tkinter import messagebox, ttk
 
-from .core import require
-from .processes import executable
+from .core import Invalid, require
+from .processes import env_for_process, executable, run
 from .ssh import ssh_env
 from .supervisor import read_config
 from .terminal import TerminalView, operator_shell
-from .workspace import read_workspace, scan_clis
+from .workspace import opencode_model_provider, read_workspace, scan_clis
 
 
 AI_CLIS = ("OpenCode", "Codex", "Gemini CLI", "Antigravity", "Claude Code")
-MODEL_FLAGS = {"Codex": "codex"}
+MODEL_FLAGS = {"Codex": "codex", "OpenCode": "opencode"}
+
+
+@dataclass(frozen=True)
+class TerminalModel:
+    provider: str
+    identifier: str
+    executable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,12 +81,19 @@ class WorkspaceSessions:
         registry = read_config(self.root)
         profiles = {}
         for key, model in registry["models"].items():
-            if not any(registry["harnesses"][name]["kind"] == adapter for name in model.get("harnesses", ())):
+            harnesses = [registry["harnesses"][name] for name in model.get("harnesses", ())
+                         if registry["harnesses"][name]["kind"] == adapter]
+            if not harnesses:
                 continue
             # A Runtime route alone cannot configure a standalone interactive CLI.
             target = model.get("cli_model") or (model["model"] if not model.get("runtime") else None)
-            if isinstance(target, str) and 0 < len(target) <= 200 and not target.startswith("-") and "\0" not in target:
-                profiles[key] = (model["provider"], target)
+            if cli == "OpenCode":
+                provider = opencode_model_provider(target)
+                attached = next((item for item in harnesses if item.get("trusted")), None)
+                if provider and attached and not model.get("runtime"):
+                    profiles[key] = TerminalModel(provider, target, attached["executable"])
+            elif isinstance(target, str) and 0 < len(target) <= 200 and not target.startswith("-") and "\0" not in target:
+                profiles[key] = TerminalModel(model["provider"], target)
         return profiles
 
     def _terminal_title(self, recipe):
@@ -97,13 +113,29 @@ class WorkspaceSessions:
         cwd = Path(project["path"]) if project else None
         if recipe.kind == "local":
             return operator_shell(), cwd, None
-        detected = scan_clis().get(recipe.profile)
-        require(detected, self.w("{0} 실행 파일이 PATH에 없습니다. CLI를 설치한 뒤 다시 실행하세요.", recipe.profile))
-        args = [executable(detected)]
+        model = None
         if recipe.model:
             model = self.available_terminal_models(recipe.profile).get(recipe.model)
             require(model, self.w("이 CLI에서 시작 모델로 사용할 수 있는 설정을 선택하세요."))
-            args.extend(["--model", model[1]])
+        if recipe.profile == "OpenCode" and model:
+            path = executable(model.executable)
+            code, output = run([path, "--version"], env=env_for_process(), timeout=5, limit=4096)
+            version = re.search(rb"(?im)^(?:opencode[ \t]+)?v?([12])\.\d+\.\d+\b", output)
+            require(code == 0 and version,
+                    self.w("시작 모델을 지정하려면 OpenCode 1.x 또는 2.x 실행 파일이 필요합니다."))
+            # OpenCode 2's full-screen entry point has no --model flag.
+            mode = ["mini", "--standalone"] if version[1] == b"2" else []
+            return [path, *mode, "--model", model.identifier], cwd, None
+        detected = scan_clis().get(recipe.profile)
+        if not detected:
+            message = (
+                "{0}의 Windows 실행 파일(.exe 또는 .com)을 PATH에 추가하세요." if sys.platform == "win32"
+                else "{0} 실행 파일이 PATH에 없습니다. CLI를 설치한 뒤 다시 실행하세요."
+            )
+            raise Invalid(self.w(message, recipe.profile))
+        args = [executable(detected)]
+        if model:
+            args.extend(["--model", model.identifier])
         return args, cwd, None
 
     def _terminal_tab(self, title, recipes, orient="horizontal", sash=.5):

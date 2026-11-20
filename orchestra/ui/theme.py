@@ -151,6 +151,11 @@ def approval_state_info(job: dict | None, tasks: dict | None = None, events: lis
     if state == "CANCELLED":
         return "REJECTED", "승인 거절", "danger", False, ["작업이 취소되었거나 병합 승인이 거절되었습니다."]
     if state == "FAILED":
+        reviews = [(row.get("result") or {}) for row in tasks.values() if row.get("state") == "FAILED"]
+        blockers = [review["reason"] for review in reviews
+                    if review.get("review") in ("failed", "invalid") and review.get("reason")]
+        if blockers:
+            return "REJECTED", "검토 거절", "danger", False, blockers
         reason = result.get("reason") or "통합 QA 또는 실행 단계가 실패했습니다."
         return "QA_FAILED", "QA 실패", "danger", False, [str(reason)]
     if state == "AWAITING_APPROVAL":

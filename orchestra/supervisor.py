@@ -11,7 +11,8 @@ import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
-from .core import Invalid, Stopped, Temporary, atomic_bytes, atomic_json, config_check, defaults, digest, path_in, plan_check, require, settings
+from .core import (SECRET_FILE, Invalid, Stopped, Temporary, atomic_bytes, atomic_json, config_check,
+                   defaults, digest, opencode_model_provider, path_in, plan_check, require, settings)
 from .execution_state import BLOCKED, ready_tasks
 from .gitgate import GitGate
 from .platform.filesystem import repository_identity
@@ -43,6 +44,31 @@ def ordered(tasks):
     return sequence, ancestry
 
 
+def dependency_context(spec, ancestors, specs, rows):
+    if spec["role"] == "developer":
+        notes = []
+        for key in spec.get("depends", []):
+            if specs[key]["role"] == "planner" and len(notes) < 6:
+                answer = (rows[key]["checkpoint"] or {}).get("answer")
+                if isinstance(answer, str) and answer.strip():
+                    notes.append({"task": key, "notes": answer[:1000]})
+        return {"planning_notes": notes} if notes else {}
+    if spec["role"] == "reviewer" and ancestors:
+        scopes = spec.get("read_paths")
+        files = sorted({name for key in ancestors for name in rows[key]["result"].get("changed", [])
+                        if not SECRET_FILE.search(name) and (scopes is None or path_in(name, scopes))})
+        return {"changed_paths": files[:40], "more_changed_paths": len(files) > 40}
+    return {}
+
+
+def review_verdict(answer):
+    lines = answer.strip().splitlines()
+    markers = {line.strip() for line in lines} & {"REVIEW: PASS", "REVIEW: FAIL"}
+    if lines and markers == {lines[-1].strip()}:
+        return "passed" if "REVIEW: PASS" in markers else "failed"
+    return "invalid"
+
+
 class JobRunner:
     def __init__(self, store, pool, job, closed, client_alive, merge_lock):
         self.store, self.pool, self.job = store, pool, job
@@ -62,7 +88,12 @@ class JobRunner:
     def event(self, kind, payload):
         self.store.event(self.id, None, kind, payload)
 
-    def task(self, spec, base, deps, row):
+    def answer_artifact(self, task_id, answer):
+        artifact = self.store.root / "artifacts" / self.id / (task_id + ".txt")
+        atomic_bytes(artifact, answer.encode())
+        return {"answer_hash": digest(answer), "artifact": str(artifact)}
+
+    def task(self, spec, base, deps, row, context):
         task_id = spec["id"]
         attempt = row["attempt"] + 1
         checkpoint = row["checkpoint"]
@@ -81,10 +112,12 @@ class JobRunner:
                 self.store.set_task(self.id, task_id, "FAILED", route=event_route,
                                     result={"reason": str(exc) if isinstance(exc, Invalid) else type(exc).__name__})
             return
-        candidates = routes(self.job["config"], spec)
+        rejected = []
+        candidates = routes(self.job["config"], spec, rejected=rejected)
         if checkpoint:
             candidates = [route for route in candidates if route.event(spec) == checkpoint.get("route")]
-        last = Invalid("작업 조건과 일치하는 모델 실행 경로가 없습니다.")
+        last = Invalid(rejected[0] if rejected else "작업 조건과 일치하는 모델 실행 경로가 없습니다.")
+        output = {}
         for route in candidates:
             event_route = route.event(spec)
 
@@ -96,7 +129,10 @@ class JobRunner:
                     raise Stopped("실행 준비 중 중지되었습니다.")
                 with self.pool.reserve(route, self.job["config"], self.stop) as client:
                     validated = client.probe(route, spec, emit) if client else None
-                    emit("route.selected", {"provider": route.model["provider"], "manual_model": bool(spec.get("model")),
+                    model_requested = route.requested_model()
+                    provider_requested = opencode_model_provider(model_requested) if route.harness["kind"] == "opencode" else None
+                    emit("route.selected", {"provider": route.model["provider"], "model_requested": model_requested,
+                                            "provider_requested": provider_requested, "manual_model": bool(spec.get("model")),
                                             "manual_harness": bool(spec.get("harness")),
                                             "quality": route.model.get("quality", 0), "reliability": route.model.get("reliability", 0),
                                             "tool_score": route.model.get("tool_score", 0), "cost": route.model.get("cost", 0)})
@@ -108,23 +144,25 @@ class JobRunner:
                     self.store.set_task(self.id, task_id, "RUNNING", route=event_route)
                     if route.harness["kind"] == "managed":
                         answer = Managed(self.store, self.job, spec, route, self.git, path, client,
-                                         validated, emit, self.stop).execute_plan(checkpoint)
+                                         validated, emit, self.stop).execute_plan(checkpoint, context=context)
                     elif checkpoint:
                         require(checkpoint["step"] in ("agent_done", "commit_started", "committed"),
                                 "중단된 Attached CLI는 외부 실행을 다시 호출하기 전에 확인이 필요합니다.")
                         answer = checkpoint["answer"]
                     else:
                         checkpoint = {"step": "attached_started", "route": event_route, "initial_head": self.git.head(path)}
-                        self.store.checkpoint(self.id, task_id, checkpoint, event_route)
-                        answer = attached(route, spec, path, client, validated, emit, self.stop)
+                        answer = attached(route, spec, path, client, validated, emit, self.stop, context=context,
+                                          on_start=lambda: self.store.checkpoint(self.id, task_id, checkpoint, event_route))
                         require(self.git.head(path) == checkpoint["initial_head"],
                                 "Attached CLI가 Git HEAD를 변경했습니다.")
                         checkpoint.update(step="agent_done", answer=answer)
                         self.store.checkpoint(self.id, task_id, checkpoint, event_route)
                 if spec["role"] == "reviewer":
-                    passed = answer.rstrip().splitlines()[-1].strip() == "REVIEW: PASS"
-                    emit("review.result", {"status": "passed" if passed else "failed"})
-                    require(passed, "독립 Reviewer가 변경을 통과시키지 않았습니다.")
+                    verdict = review_verdict(answer)
+                    output = self.answer_artifact(task_id, answer) | {"review": verdict}
+                    emit("review.result", {"status": verdict})
+                    require(verdict != "invalid", "Reviewer의 최종 REVIEW: PASS 또는 REVIEW: FAIL 판정이 필요합니다.")
+                    require(verdict == "passed", "독립 Reviewer가 변경을 통과시키지 않았습니다.")
                 checkpoint = self.store.tasks(self.id)[task_id]["checkpoint"]
                 if checkpoint["step"] == "committed":
                     require(self.git.head(path) == (checkpoint["commit"] or checkpoint["initial_head"])
@@ -151,11 +189,9 @@ class JobRunner:
                     emit("git.commit", {"commit": commit, "changed": changed})
                 self.store.set_task(self.id, task_id, "VERIFYING", route=event_route)
                 qa = self.git.qa(path, spec.get("qa", []), task_id, event_route)
-                artifact = self.store.root / "artifacts" / self.id / (task_id + ".txt")
-                atomic_bytes(artifact, answer.encode())
+                output = output or self.answer_artifact(task_id, answer)
                 self.store.set_task(self.id, task_id, "SUCCEEDED", result={
-                    "commit": commit, "changed": changed, "qa": qa,
-                    "answer_hash": digest(answer), "artifact": str(artifact),
+                    "commit": commit, "changed": changed, "qa": qa, **output,
                 }, route=event_route)
                 return
             except AwaitApproval:
@@ -176,7 +212,7 @@ class JobRunner:
                                 result={"reason": str(last)})
         else:
             reason = str(last) if isinstance(last, (Invalid, Temporary)) else type(last).__name__
-            self.store.set_task(self.id, task_id, "FAILED", result={"reason": reason})
+            self.store.set_task(self.id, task_id, "FAILED", result={**output, "reason": reason})
 
     def execute(self):
         if self.job["state"] == "MERGING":
@@ -207,7 +243,9 @@ class JobRunner:
                 for key in ready_tasks(sequence, ancestry, rows, active, time.time(), self.conf["parallel_tasks"]):
                     deps = ancestry[key]
                     commits = [rows[dep]["result"]["commit"] for dep in sequence if dep in deps and rows[dep]["result"]["commit"]]
-                    active[key] = workers.submit(self.task, self.roles[key], base, commits, rows[key])
+                    spec = self.roles[key]
+                    context = dependency_context(spec, deps, self.roles, rows)
+                    active[key] = workers.submit(self.task, spec, base, commits, rows[key], context)
                 if active:
                     wait(active.values(), timeout=.2, return_when=FIRST_COMPLETED)
                     for key, future in list(active.items()):

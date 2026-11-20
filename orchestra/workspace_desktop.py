@@ -959,7 +959,8 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         duration = self.w("{0:.1f}초", agent['elapsed']) if agent["elapsed"] is not None else self.w("미관측")
         lines = [
             self.w("{0} · {1} · 이 PC", agent['id'], state_label(agent['state'], self.locale)),
-            self.w("Provider {0}   모델 {1}   Runtime {2}", render(agent['provider']), render(agent['model']), render(agent['runtime'])),
+            self.w("요청 Provider {0}   모델 {1}   Runtime {2}", render(agent['provider_requested'] or agent['provider']),
+                   render(agent['model_requested'] or agent['model']), render(agent['runtime'])),
             self.w("시작 {0}  ·  경과 {1}  ·  재시도 {2}  ·  도구 {3}회", started, duration, agent['retry_count'], agent['tools']),
             self.w("입력 {0}  ·  출력 {1}  ·  최근 Prompt 토큰 {2}  ·  검증된 Context 한도 {3}", render(agent['input']), render(agent['output']), render(agent['last_prompt']), render(agent['context'])),
             self.w("변경 파일 {0}", one_line(agent['changed'])),
