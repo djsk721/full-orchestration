@@ -61,7 +61,10 @@ def native_windows():
     def open_terminal(hwnd):
         user32.SetForegroundWindow(hwnd)
         wait_for(lambda: user32.GetForegroundWindow() == hwnd, "the packaged workspace did not receive focus", timeout=5)
-        control, letter_t, key_up = 0x11, 0x54, 0x02
+        tab, control, letter_t, key_up = 0x09, 0x11, 0x54, 0x02
+        # Establish focus inside Tk after the first-run dialog has closed.
+        user32.keybd_event(tab, 0, 0, 0)
+        user32.keybd_event(tab, 0, key_up, 0)
         user32.keybd_event(control, 0, 0, 0)
         try:
             user32.keybd_event(letter_t, 0, 0, 0)
@@ -95,6 +98,22 @@ def local_shell(owner):
     return None
 
 
+def start_local_shell(owner, window, open_terminal):
+    next_shortcut = 0.0
+
+    def probe():
+        nonlocal next_shortcut
+        if shell := local_shell(owner):
+            return shell
+        if time.monotonic() >= next_shortcut:
+            # Reopening the same local session focuses its existing terminal.
+            open_terminal(window)
+            next_shortcut = time.monotonic() + 5
+        return None
+
+    return wait_for(probe, "the packaged Tk workspace did not start its local shell")
+
+
 def exercise(binary, profile, *, open_terminal):
     find_window, close_window, open_local_terminal = native_windows()
     env = os.environ | {"ORCHESTRA_DATA": str(profile)}
@@ -114,8 +133,7 @@ def exercise(binary, profile, *, open_terminal):
         status = profile / "supervisor.json"
         print(f"Tk first-run and packaged Supervisor startup PASS (PID {first.pid})", flush=True)
         if open_terminal:
-            open_local_terminal(window)
-            terminal = wait_for(lambda: local_shell(owner), "the packaged Tk workspace did not start its local shell")
+            terminal = start_local_shell(owner, window, open_local_terminal)
             owned.append(terminal)
             print(f"Packaged local terminal startup PASS (PowerShell PID {terminal.pid})", flush=True)
 
