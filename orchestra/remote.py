@@ -18,14 +18,16 @@ from .execution_state import MERGE_EVIDENCE, TERMINAL, task_stage
 from .harness import workspace_path
 from .platform.process_control import process_lock
 from .processes import env_for_process, run
+from .project_files import MAX_FILE, project_file_diff, project_file_visible, project_git_status
 from .ssh import MAX_REQUEST, PROTOCOL, remote_path
 from .store import Store
 from .supervisor import read_config, start_supervisor
 from .workspace import inspect_project, plan_routes, protect_and_save, save_registry, scan_clis
+from .worker_compat import worker_manifest
 
-ALLOWED_METHODS = {"info", "project", "validate", "submit", "status", "action", "approvals", "decide", "browse", "download", "upload"}
+GIT_METHODS = {"git_status", "git_diff"}
+ALLOWED_METHODS = {"info", "project", "validate", "submit", "status", "action", "approvals", "decide", "browse", "download", "upload"} | GIT_METHODS
 TERMINAL_STATES = {"FAILED", "CANCELLED", "SUCCEEDED", "MERGED"}
-MAX_FILE = 200_000
 
 
 def metrics(*, gpu=False):
@@ -158,11 +160,27 @@ def _files(root, method, args):
     return {"name": name, "path": str(target)}
 
 
+def _git_context(root, method, args):
+    repo = _approved(root, args["repo"])
+    relative = args.get("path")
+    if method == "git_diff":
+        require(project_file_visible(relative), "보호된 경로나 지원하지 않는 파일 이름입니다.")
+    branch, rows = project_git_status(repo)
+    if method == "git_status":
+        return {"branch": branch, "changes": dict(list(rows.items())[:300]), "truncated": len(rows) > 300}
+    require(relative in rows, "선택한 파일의 최신 Git 변경을 찾을 수 없습니다.")
+    diff = project_file_diff(repo, relative, rows[relative])
+    require(len(diff.encode("utf-8")) <= MAX_FILE, "Git Diff 미리 보기 한도를 초과했습니다.")
+    return {"path": relative, "diff": diff}
+
+
 def dispatch(root, message, *, restart=True):
     require(isinstance(message, dict) and message.get("version") == PROTOCOL, "지원하는 Worker 프로토콜 버전이 아닙니다.")
     method, args = message.get("method"), message.get("params", {})
     require(isinstance(method, str) and method in ALLOWED_METHODS and isinstance(args, dict), "지원하지 않는 Worker 요청입니다.")
     policy = worker_settings(root)
+    if method == "info" and args.get("compatibility_only") is True:
+        return {"compatibility": worker_manifest(PROTOCOL, upload=bool(policy.get("allow_upload")))}
     config = read_config(root)
     if method == "info":
         info = metrics(gpu=args.get("gpu") is True)
@@ -179,12 +197,15 @@ def dispatch(root, message, *, restart=True):
                     models={name: {"provider": value["provider"], "model": value["model"]}
                             for name, value in config["models"].items()},
                     harnesses={name: value["kind"] for name, value in config["harnesses"].items()},
-                    allow_upload=bool(policy.get("allow_upload")))
+                    allow_upload=bool(policy.get("allow_upload")), git_context=True,
+                    compatibility=worker_manifest(PROTOCOL, upload=bool(policy.get("allow_upload"))))
         return info
     if method == "project":
         return inspect_project(_approved(root, args["repo"]))
     if method in ("browse", "download", "upload"):
         return _files(root, method, args)
+    if method in GIT_METHODS:
+        return _git_context(root, method, args)
     if method == "validate":
         return _validate(root, args["plan"], config)
     store = Store(root)

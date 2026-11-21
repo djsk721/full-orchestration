@@ -53,8 +53,11 @@ def agent_rows(job, tasks, events, *, now=None, config=None):
         failures = [event["payload"].get("reason") for event in current if event["event_type"] == "route.failed"]
         output = task.get("result") or task
         model = active.get("model_id")
+        selected = next((event["payload"] for event in reversed(current) if event["event_type"] == "route.selected"), {})
         result.append({
-            "id": key, "agent": active.get("agent_id"), "role": role, "provider": models.get(model, {}).get("provider"),
+            "id": key, "agent": active.get("agent_id"), "role": role,
+            "provider": selected.get("provider") or models.get(model, {}).get("provider"),
+            "provider_requested": selected.get("provider_requested"), "model_requested": selected.get("model_requested"),
             "model": model, "harness": active.get("harness_id"), "runtime": active.get("runtime_id"),
             "state": stage, "started": started, "elapsed": max(0, duration) if duration is not None else None,
             "retry_count": max(0, current_attempt - 1),

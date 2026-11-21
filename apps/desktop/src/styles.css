@@ -33,6 +33,38 @@
 }
 
 * { box-sizing: border-box; }
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg-canvas: #f4f6fa;
+    --bg-header: #fff;
+    --bg-panel: #fff;
+    --bg-card: #f1f5f9;
+    --bg-card-hover: #e2e8f0;
+    --bg-active: #dbeafe;
+    --border-subtle: #cbd5e1;
+    --border-strong: #64748b;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #52657c;
+    --accent: #2563eb;
+    --tone-info-bg: #dbeafe;
+    --tone-info-fg: #1e40af;
+    --tone-info-border: #93c5fd;
+    --tone-success-bg: #dcfce7;
+    --tone-success-fg: #166534;
+    --tone-success-border: #86efac;
+    --tone-warning-bg: #fef3c7;
+    --tone-warning-fg: #92400e;
+    --tone-warning-border: #fcd34d;
+    --tone-danger-bg: #fee2e2;
+    --tone-danger-fg: #991b1b;
+    --tone-danger-border: #fca5a5;
+    --tone-neutral-bg: #e2e8f0;
+    --tone-neutral-fg: #334155;
+    --tone-neutral-border: #cbd5e1;
+  }
+}
 body {
   margin: 0;
   background: var(--bg-canvas);
@@ -156,7 +188,7 @@ h3 {
 
 .dashboard {
   display: grid;
-  grid-template-columns: minmax(18rem, 23rem) minmax(0, 1fr);
+  grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }

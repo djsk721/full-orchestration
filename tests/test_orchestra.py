@@ -16,11 +16,12 @@ from unittest.mock import patch
 from orchestra.core import Invalid, atomic_json, config_check, defaults, plan_check
 from orchestra.discovery import discover, migrate, rollback
 from orchestra.gitgate import GitGate
-from orchestra.harness import workspace_path
+from orchestra.harness import attached_result, workspace_path
 from orchestra.mcp import Gateway, virtual_name
 from orchestra.runtime import RuntimeClient, routes
 from orchestra.store import Store
 from orchestra.supervisor import Supervisor
+from orchestra.workspace import plan_routes
 
 TOOLS = [
     {"name": "lookup", "description": "Lookup", "inputSchema": {
@@ -77,6 +78,13 @@ class Fixture(BaseHTTPRequestHandler):
         messages = msg["messages"]
         names = {item["function"]["name"] for item in msg.get("tools", [])}
         context = messages[1]["content"] if len(messages) > 1 else ""
+        if "developer execution fails" in context:
+            return self.send({"error": "fixture request rejected"}, 400)
+        if "reject implementation" in context:
+            text = "The result omits a boundary case.\nREVIEW: FAIL"
+            if "ambiguous verdict" in context:
+                text += "\nREVIEW: PASS"
+            return self.send({"model": "test-model", "choices": [{"message": {"content": text}, "finish_reason": "stop"}]})
         if "provider timeout" in context:
             self.server.inference_requests += 1
             if self.server.inference_requests == 1:
@@ -121,8 +129,8 @@ class Fixture(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def http_fixture():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
+def http_fixture(handler=Fixture):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     server.barrier = threading.Barrier(2)
     server.writes = 0
     server.drop_write_response = False
@@ -232,6 +240,66 @@ class OrchestrationTest(unittest.TestCase):
                     self.store.request(job, "merge", "arbitrary")
                 self.assertTrue(any(e["event_type"] == "qa.result" and e["payload"]["exit_code"] == 7
                                     for e in self.store.events(job)))
+
+    def test_reviewer_failure_preserves_explanation_and_blocks_downstream_qa(self):
+        with http_fixture() as (fixture, url):
+            fixture.released.set()
+            cfg = config(url)
+            with self.daemon(cfg):
+                for suffix, verdict in (("", "failed"), (" ambiguous verdict", "invalid")):
+                    with self.subTest(verdict=verdict):
+                        command = [sys.executable, "-c", "raise SystemExit(3)"]
+                        plan = self.plan([
+                            task("dev", "ui workflow", "developer", paths=["ui-result.txt"]),
+                            task("review", "reject implementation" + suffix, "reviewer", depends=["dev"]),
+                            task("qa", "verify", "qa", depends=["review"], qa=[command]),
+                        ], [command])
+                        job = self.store.submit(plan_check(plan, cfg), cfg, None)
+                        self.poll(job, {"FAILED"})
+                        report = self.store.report(job)
+                        self.assertEqual(report["tasks"]["qa"]["attempt"], 0)
+                        self.assertFalse(any(e["event_type"] == "qa.result" for e in report["events"]))
+                        review = report["tasks"]["review"]["result"]
+                        self.assertEqual(review["review"], verdict)
+                        self.assertIn("omits a boundary case", Path(review["artifact"]).read_text(encoding="utf-8"))
+                        self.assertFalse((self.repo / "ui-result.txt").exists())
+                        with self.assertRaises(Invalid):
+                            self.store.request(job, "merge", "a" * 40, approval_revision="b" * 32)
+
+    def test_developer_failure_leaves_review_unexecuted(self):
+        with http_fixture() as (_, url):
+            cfg = config(url)
+            plan = self.plan([task("dev", "developer execution fails", "developer", paths=["allowed.txt"]),
+                              task("review", "inspect implementation", "reviewer", depends=["dev"])],
+                             [[sys.executable, "-c", "raise SystemExit(3)"]])
+            job = self.store.submit(plan_check(plan, cfg), cfg, None)
+            with self.daemon(cfg):
+                self.poll(job, {"FAILED"})
+            report = self.store.report(job)
+            self.assertEqual(report["tasks"]["dev"]["state"], "FAILED")
+            self.assertEqual(report["tasks"]["review"]["attempt"], 0)
+            self.assertFalse((self.repo / "allowed.txt").exists())
+
+    def test_retry_after_failed_qa_does_not_reexecute_successful_agents(self):
+        with http_fixture() as (fixture, url):
+            fixture.released.set()
+            cfg = config(url)
+            marker = Path(self.temp.name) / "qa-ready"
+            plan = self.plan([task("dev", "ui workflow", "developer", paths=["ui-result.txt"]),
+                              task("review", "ui workflow", "reviewer", depends=["dev"])],
+                             [[sys.executable, "-c", "import sys; from pathlib import Path; assert Path(sys.argv[1]).is_file()", str(marker)]])
+            job = self.store.submit(plan_check(plan, cfg), cfg, None)
+            with self.daemon(cfg):
+                self.poll(job, {"FAILED"})
+                marker.touch()
+                self.store.request(job, "retry")
+                ready = self.poll(job, {"AWAITING_APPROVAL"})
+            self.assertEqual([row["attempt"] for row in self.store.tasks(job).values()], [1, 1])
+            events = self.store.events(job)
+            self.assertEqual(sum(event["event_type"] == "review.result" for event in events), 1)
+            self.assertEqual([event["payload"]["exit_code"] for event in events if event["event_type"] == "qa.result"], [1, 0])
+            self.assertEqual(ready["result"]["qa"][0]["commit"], ready["result"]["candidate"])
+            self.assertFalse((self.repo / "ui-result.txt").exists())
 
     def test_stale_approval_and_moved_git_branch_cannot_integrate(self):
         with http_fixture() as (fixture, url):
@@ -361,7 +429,7 @@ class OrchestrationTest(unittest.TestCase):
                 atomic_json(target, {"x": "keep", "mcp": {"existing": {"type": "remote", "url": url + "/mcp", "oauth": False}}})
                 before = target.read_bytes()
                 records, _ = discover(self.repo)
-                record = next(item for item in records if item["path"] == str(target))
+                record = next(item for item in records if item["path"] == str(target.resolve()))
                 self.assertEqual(target.read_bytes(), before)
                 with self.assertRaises(Invalid):
                     migrate(self.root, cfg, record, "fixture", "mutate", {}, self.repo)
@@ -459,7 +527,7 @@ class OrchestrationTest(unittest.TestCase):
         with http_fixture() as (_, url):
             cfg = config(url)
             cfg["harnesses"]["external"] = {"kind": "opencode", "executable": "opencode",
-                                            "trusted": True, "allow_write": True}
+                                            "trusted": True, "allow_write": True, "inherit_environment": True}
             cfg["models"]["model"]["harnesses"].append("external")
             spec = task("explore", "inspect", harness="external")
             route = routes(cfg, spec)[0]
@@ -472,16 +540,73 @@ class OrchestrationTest(unittest.TestCase):
                     return 0, b"2.1.0"
                 self.assertIn("--standalone", argv)
                 self.assertIn("orchestralocal/test-model", argv)
+                self.assertEqual(kwargs["cwd"], self.repo)
+                if os.name == "posix":
+                    self.assertEqual(kwargs["env"]["PWD"], str(self.repo.resolve()))
                 value = json.loads(Path(kwargs["env"]["OPENCODE_CONFIG"]).read_bytes())
                 provider = value["providers"]["orchestralocal"]
                 self.assertEqual(provider["settings"]["baseURL"], url + "/v1")
                 self.assertEqual(provider["models"]["test-model"]["limit"], {"context": 32768, "output": 4096})
                 return 0, b'{"type":"text","part":{"text":"Attached analysis"}}'
 
-            with patch("orchestra.harness.run", side_effect=fake_cli):
+            with patch.dict(os.environ, {"PWD": str(self.root)}), patch("orchestra.harness.run", side_effect=fake_cli):
                 self.assertEqual(attached(route, spec, self.repo, client, validated,
                                           lambda *event: observed.append(event), lambda: False), "Attached analysis")
             self.assertEqual(observed[0][1]["internal_config"], "not_verifiable")
+
+    def test_attached_routes_reject_incompatible_permissions_and_model_ids(self):
+        cfg = defaults()
+        cfg["settings"]["background"] = True
+        cfg["harnesses"]["cli"] = {"kind": "opencode", "executable": "opencode", "trusted": True, "allow_unverified": True}
+        cfg["models"]["requested"] = {"provider": "subscription", "model": "openai/gpt-5.6-luna", "harnesses": ["cli"]}
+        inspect = task("inspect", "Read-only scoped analysis", "planner", model="requested", harness="cli")
+        plan = self.plan([inspect])
+        self.assertEqual(plan_routes(plan, cfg), {"inspect": ["requested / cli"]})
+        self.assertEqual(routes(cfg, inspect)[0].requested_model(), "openai/gpt-5.6-luna")
+        cfg["settings"]["allow_background_write"] = True
+        with self.assertRaisesRegex(Invalid, "Managed"):
+            plan_routes(self.plan([inspect | {"role": "developer", "paths": ["allowed.txt"]}], [["git", "--version"]]), cfg)
+        cfg["models"]["requested"]["cli_model"] = "--prompt"
+        with self.assertRaisesRegex(Invalid, "provider/model"):
+            plan_routes(plan, cfg)
+        cfg["models"]["requested"]["provider"] = "missing"
+        with self.assertRaisesRegex(Invalid, "Provider"):
+            config_check(cfg)
+
+    def test_attached_errors_are_actionable_without_raw_payloads(self):
+        for status, expected in ((401, "인증"), (404, "provider/model"), (400, "HTTP 400")):
+            with self.subTest(status=status):
+                failure = {"type": "error", "error": {"type": "provider.invalid-request", "status": status,
+                           "message": "private response body"}}
+                good = b'{"type":"text","part":{"text":"REVIEW: PASS"}}'
+                with self.assertRaisesRegex(Invalid, expected) as caught:
+                    attached_result(1, good + b"\n" + json.dumps(failure).encode(), lambda *_: None)
+                self.assertNotIn("private response body", str(caught.exception))
+        with self.assertRaisesRegex(Invalid, "종료 코드 9"):
+            attached_result(9, b"native process stopped", lambda *_: None)
+
+    def test_attached_parser_replays_the_saved_gpt_text_and_observed_usage(self):
+        stream = [{"type": "text", "part": {"text": "ORCHESTRATION_GPT_TEST_OK"}},
+                  {"type": "step_finish", "part": {"reason": "stop", "tokens": {"input": 29, "output": 12}}}]
+        observed = []
+        raw = "\n".join(json.dumps(event) for event in stream).encode()
+        self.assertEqual(attached_result(0, raw, lambda *event: observed.append(event)), "ORCHESTRATION_GPT_TEST_OK")
+        [(event, usage)] = observed
+        self.assertEqual((event, usage["prompt_tokens"], usage["completion_tokens"]), ("model.usage", 29, 12))
+
+    def test_missing_attached_executable_does_not_record_an_uncertain_agent_start(self):
+        cfg = defaults()
+        cfg["settings"].update(background=True, heartbeat_sec=1, lease_sec=4)
+        cfg["harnesses"]["cli"] = {"kind": "opencode", "executable": str(self.repo / "absent-cli.exe"),
+                                    "trusted": True, "allow_unverified": True}
+        cfg["models"]["selected"] = {"provider": "subscription", "model": "openai/gpt-5.6-luna", "harnesses": ["cli"]}
+        plan = self.plan([task("plan", "Inspect the fixture", "planner", model="selected", harness="cli")])
+        job = self.store.submit(plan_check(plan, cfg), cfg, None)
+        with self.daemon(cfg):
+            self.poll(job, {"FAILED"})
+        row = self.store.tasks(job)["plan"]
+        self.assertIsNone(row["checkpoint"])
+        self.assertIn("absent-cli.exe", row["result"]["reason"])
 
     def test_expired_lease_recovers_and_unknown_effect_cannot_be_retried(self):
         with http_fixture() as (_, url):

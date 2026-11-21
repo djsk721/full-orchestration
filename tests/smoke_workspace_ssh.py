@@ -4,6 +4,7 @@ import json
 import os
 import select
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -16,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orchestra.core import Invalid, Temporary
 from orchestra.remote import register_project
-from orchestra.ssh import SSHClient, fingerprint, scan_keys, ssh_env, trust_key
+from orchestra.ssh import SSHClient, WorkerFeatureUnavailable, fingerprint, scan_keys, ssh_env, trust_key, worker_compatibility
 from orchestra.store import Store
 from orchestra.terminal import Pty
 from orchestra.supervisor import read_config
@@ -24,6 +25,7 @@ from orchestra.workspace import STRATEGIES, draft_plan, save_registry
 
 parser = argparse.ArgumentParser(description="Verify a headless Worker through a real OpenSSH connection.")
 parser.add_argument("--typescript", action="store_true", help="also verify the built TypeScript SSH adapter")
+parser.add_argument("--legacy-ref", help="also run the earlier Worker entry point from this local Git revision")
 args = parser.parse_args()
 source = Path(__file__).resolve().parents[1]
 
@@ -124,7 +126,46 @@ AllowUsers {user}
             else:
                 raise AssertionError("Changed host key accepted")
             trust_key(client.root, client.id, client.profile, check, observed)
-            assert client.call("info")["repos"] == [str(repo)]
+            info = client.call("info")
+            assert info["repos"] == [str(repo)] and info["git_context"]
+            assert worker_compatibility(info)["state"] == "compatible"
+            if args.legacy_ref:
+                legacy_dir = root / "legacy-worker"
+                shutil.copytree(source / "orchestra", legacy_dir / "orchestra", ignore=shutil.ignore_patterns("__pycache__"))
+                earlier = subprocess.check_output(["git", "-C", str(source), "show", f"{args.legacy_ref}:orchestra/remote.py"])
+                (legacy_dir / "orchestra" / "remote.py").write_bytes(earlier)
+                legacy = SSHClient(client.root, client.id, spec | {"worker_dir": str(legacy_dir)})
+                assert worker_compatibility(legacy.call("info", compatibility_only=True))["state"] == "legacy"
+                assert legacy.call("project", repo=str(repo))["path"] == str(repo)
+                try:
+                    legacy.worker_git("git_status", repo=str(repo))
+                except WorkerFeatureUnavailable:
+                    pass
+                else:
+                    raise AssertionError("Legacy Worker unexpectedly advertised remote Git")
+                assert {"git.status", "git.diff"} <= set(worker_compatibility(
+                    client.call("info", compatibility_only=True))["capabilities"])
+                print("Earlier and current Worker handlers verified through the same pinned OpenSSH server.", flush=True)
+            preview_file = repo / "workspace-preview.md"
+            preview_file.write_text("Remote diff marker\n", encoding="utf-8")
+            secret = repo / ".env"
+            secret.write_text("TEST_SECRET_FIXTURE=hidden\n", encoding="utf-8")
+            status = client.call("git_status", repo=str(repo))
+            assert status == {"branch": "main", "changes": {"workspace-preview.md": "??"}, "truncated": False}
+            assert "+Remote diff marker" in client.call("git_diff", repo=str(repo), path=preview_file.name)["diff"]
+            for request in (
+                {"repo": str(repo), "path": ".env"},
+                {"repo": str(repo), "path": "../worker/worker.json"},
+                {"repo": str(root), "path": preview_file.name},
+            ):
+                try:
+                    client.call("git_diff", **request)
+                except Invalid as problem:
+                    assert "TEST_SECRET_FIXTURE" not in str(problem)
+                else:
+                    raise AssertionError("Worker accepted a protected diff path")
+            preview_file.unlink()
+            secret.unlink()
             shell = Pty(client.terminal(str(repo)), None, ssh_env())
             try:
                 assert_terminal_output(shell, "orch-remote-pty-ok")
@@ -195,6 +236,12 @@ raise SystemExit(0 if release.exists() else 9)
             daemon.terminate()
             daemon.wait(timeout=5)
             try:
+                reconnected.call("git_status", repo=str(repo))
+            except Temporary:
+                pass
+            else:
+                raise AssertionError("Git status did not report a disconnected Worker")
+            try:
                 reconnected.call("status", job=offline_id, after=cursor)
             except Temporary:
                 pass
@@ -205,6 +252,7 @@ raise SystemExit(0 if release.exists() else 9)
             await_condition(lambda: snapshot.job(offline_id)["state"] == "SUCCEEDED")
             daemon = subprocess.Popen([executable, "-D", "-e", "-f", str(config)], stderr=handle)
             wait_for_sshd(daemon)
+            assert reconnected.call("git_status", repo=str(repo))["branch"] == "main"
             fresh_terminal = Pty(reconnected.terminal(str(repo)), None, ssh_env())
             try:
                 assert_terminal_output(fresh_terminal, "orch-remote-pty-reconnected")
@@ -240,7 +288,7 @@ raise SystemExit(0 if release.exists() else 9)
                 following = inspect("worker-status", "local", receipt, str(first["nextCursor"]))
                 assert following["events"] == [] and following["nextCursor"] == first["nextCursor"]
                 print("TypeScript adapter read the same Python Worker run and cursor over OpenSSH.")
-            print("Real loopback OpenSSH: pinning, disconnect and offline completion, Worker restart, recovery, deduplication and cancellation passed.")
+            print("Real loopback OpenSSH: scoped Git previews, pinning, disconnect, recovery, deduplication and cancellation passed.")
         except Exception:
             print(log.read_text(), file=sys.stderr)
             raise

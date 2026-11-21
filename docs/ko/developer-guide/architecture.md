@@ -32,4 +32,4 @@ Managed 체크포인트에는 진행 단계, 경로, 메시지, 대기 호출 �
 
 `workspace_desktop.py`는 기존 Desktop의 실행 및 승인 화면을 유지하면서 프로젝트·계획·Agent·터미널 화면을 추가합니다. 구조화된 양식은 `workspace.py`의 서비스와 기존 검증기에 연결합니다. 터미널은 독립 PTY이고 Agent는 Supervisor의 구조화 이벤트로 연결됩니다. Linux `remote.py`는 OpenSSH를 통한 제한된 요청을 받으며 실행은 서버의 기존 Supervisor에 위임합니다. 원격 요청 ID와 실제 작업을 SQLite 트랜잭션으로 연결하고 사용자 재연결로 같은 실행을 조회합니다. [설치·보안 및 운영](../user-guide/workspace.md)
 
-Tk는 프로젝트, Provider 프로필, 작업 계획, 터미널 및 승인을 관리하는 기본 앱입니다. Electron 프리뷰는 실행 이력과 QA 근거를 조회하는 보조 앱입니다. 두 앱은 같은 데이터 디렉터리를 사용할 수 있고, Electron은 버전이 지정된 읽기 전용 SQLite 및 IPC 계약을 사용합니다. 쓰기와 복구는 Python이 담당합니다. Electron을 기본 앱으로 전환하려면 Python 실행 계층에 연결된 동등한 작업 흐름과 네이티브 환경 검증이 필요합니다. [릴리스 준비 검토](../../internal/release-readiness.md)
+Tk는 프로젝트, Provider 프로필, 작업 계획, 터미널 및 승인을 관리하는 기본 앱입니다. Electron 프리뷰는 실행 이력과 QA 근거를 조회하는 보조 앱입니다. 두 앱은 같은 데이터 디렉터리를 사용할 수 있고, Electron은 버전이 지정된 읽기 전용 SQLite 및 IPC 계약을 사용합니다. 쓰기와 복구는 Python이 담당합니다. Electron을 기본 앱으로 전환하려면 Python 실행 계층에 연결된 동등한 작업 흐름과 네이티브 환경 검증이 필요합니다. [릴리스 준비 검토](https://github.com/djsk721/full-orchestration/blob/main/docs/internal/release-readiness.md)

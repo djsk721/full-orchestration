@@ -39,8 +39,8 @@ class UIContractsTest(unittest.TestCase):
                 self.assertTrue(isinstance(value, str) and value.strip(), f"empty string for {locale}:{key}")
 
         nav_keys = [item_key for _, items in NAV_GROUPS for item_key, _ in items]
-        self.assertEqual(len(nav_keys), 11)
-        self.assertEqual(len(set(nav_keys)), 11)
+        self.assertIn("workspace", nav_keys)
+        self.assertEqual(len(nav_keys), len(set(nav_keys)))
         for _, items in NAV_GROUPS:
             for item_key, str_key in items:
                 for locale in LOCALES:

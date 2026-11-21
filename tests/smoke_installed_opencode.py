@@ -34,6 +34,10 @@ def reply(self):
         self.server.error_seen = True
         self.send({"error": {"message": "Synthetic OpenCode request rejected", "type": "invalid_request_error"}}, 400)
         return
+    if "ORCHESTRA_OPENCODE_NO_AUTH" in user_messages:
+        self.server.auth_error_seen = True
+        self.send({"error": {"message": "private fixture diagnostic", "type": "authentication_error"}}, 401)
+        return
     tools = {item["function"]["name"]: item["function"].get("parameters", {}) for item in message.get("tools", [])}
     self.server.saw_read_tool |= "read" in tools
     outputs = [item.get("content") for item in messages if item["role"] == "tool"]
@@ -102,6 +106,7 @@ def main():
         server.saw_read_response = False
         server.read_diagnostics = set()
         server.error_seen = False
+        server.auth_error_seen = False
         server.read_path = store.root / "worktrees" / job / "probe" / "marker.txt"
         xdg = {f"XDG_{kind}_HOME": str(root / kind.lower()) for kind in ("DATA", "CACHE", "STATE", "CONFIG")}
         with patch.dict(os.environ, xdg), patch.object(Fixture, "do_POST", reply):
@@ -131,7 +136,15 @@ def main():
             assert store.claim(failed, "fixture supervisor")
             JobRunner(store, RuntimePool(), store.job(failed), threading.Event(), lambda _: True, threading.Lock()).work()
             assert server.error_seen and store.job(failed)["state"] == "FAILED"
-        print("OpenCode installed-binary loopback: PASS (subprocess, model, read tool, cancellation, errors and history with scripted API)")
+            auth_plan = plan | {"title": "Installed OpenCode authentication failure",
+                                "tasks": [task("probe", "ORCHESTRA_OPENCODE_NO_AUTH", harness="opencode")]}
+            denied = store.submit(plan_check(auth_plan, registry), registry, None)
+            assert store.claim(denied, "fixture supervisor")
+            JobRunner(store, RuntimePool(), store.job(denied), threading.Event(), lambda _: True, threading.Lock()).work()
+            assert server.auth_error_seen and store.job(denied)["state"] == "FAILED"
+            reason = store.tasks(denied)["probe"]["result"]["reason"]
+            assert "인증" in reason and "private fixture diagnostic" not in reason
+        print("OpenCode installed-binary loopback: PASS (subprocess, model, read tool, cancellation, errors, HTTP 401 and history with scripted API)")
 
 
 def verify_completed(store, job, server):

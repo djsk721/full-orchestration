@@ -34,17 +34,64 @@ jobs:
           node-version: "24.14.1"
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065b # v5.6.0
         with:
-          python-version: "3.11.14"
+          # setup-python does not publish every 3.11 security patch for Windows.
+          python-version: ${{ runner.os == 'Windows' && '3.11' || '3.11.14' }}
       - name: Install Linux display libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb xauth tk libnss3 libgtk-3-0t64 libasound2t64 libgbm1
       - run: python -m pip install -r requirements-desktop.txt
+        id: python-deps
       - run: npm ci
-      - run: npm run verify -- --ui --package
-      - name: Exercise the installed Windows app
+        id: node-deps
+      - name: Run shared Linux regressions and packaging
+        if: runner.os == 'Linux'
+        run: npm run verify -- --ui --package
+      - name: Run shared Windows regressions
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/qa/verify-windows-installer.ps1
+        run: |
+          npm.cmd run verify -- --ui *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-shared.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check native ConPTY, Unicode and layout restore
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.python-deps.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./scripts/qa/verify-windows-workspace.ps1 -WorkspaceOnly -Benchmark *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-conpty.log')
+      - name: Build NSIS and exercise unpacked Electron
+        id: windows-package
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.python-deps.outcome == 'success' && steps.node-deps.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          npm.cmd run verify -- --package-only *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-package.log')
+          $verificationStatus = $LASTEXITCODE
+          $installer = Get-ChildItem -LiteralPath 'apps/desktop/release' -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path -LiteralPath ($_.FullName + '.blockmap') }
+          if ($installer) { 'installer-built=true' >> $env:GITHUB_OUTPUT }
+          if ($verificationStatus -ne 0) { exit $verificationStatus }
+      - name: Exercise the installed Windows workspace and monitor
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows-package.outputs.installer-built == 'true' }}
+        shell: pwsh
+        run: |
+          ./scripts/qa/verify-windows-installer.ps1 *>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'orchestra-windows-nsis.log')
+      - name: Retain Windows verification evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-verification-evidence
+          path: ${{ runner.temp }}/orchestra-windows-*.log
+          if-no-files-found: ignore
+      - name: Retain the built Windows installer
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-nsis-installer
+          path: apps/desktop/release/*.exe
+          if-no-files-found: ignore
+          retention-days: 7
 
   portable-without-runtime:
     runs-on: ubuntu-24.04

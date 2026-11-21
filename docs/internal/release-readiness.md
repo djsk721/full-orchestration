@@ -1,5 +1,7 @@
 # Release readiness and UI responsibilities
 
+For the latest terminal performance, regression and Windows preparation results, see [Workspace production readiness](workspace-production-readiness.md).
+
 ## Release candidate assessment
 
 **Overall verdict: BLOCKED.** The Linux candidate has local regression and end-to-end evidence. Windows remains a required deployment target and lacks native NSIS, ConPTY and Job Object evidence for this checkout. The authorized Codex smoke still needs a dedicated test profile and concrete model ID. macOS is outside the declared release scope.

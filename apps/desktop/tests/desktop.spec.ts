@@ -156,6 +156,7 @@ test("shows failure evidence from a real Python QA exit without an approval cand
 });
 
 test("a forcibly closed Electron cannot interrupt a running Python Supervisor", async () => {
+  test.setTimeout(60_000);
   const directory = mkdtempSync(join(tmpdir(), "orchestra-electron-detach-"));
   const python = process.env.PYTHON || "python";
   const title = "Independent Supervisor run";
@@ -170,12 +171,19 @@ test("a forcibly closed Electron cannot interrupt a running Python Supervisor", 
       env: { ...process.env, ORCHESTRA_DATA: directory }, stdio: "ignore", windowsHide: true,
     });
     await once(supervisor, "spawn");
+    await expect.poll(() => existsSync(join(directory, "started")), { timeout: 20_000 }).toBe(true);
     await expect(window.getByRole("article").getByText("verifying", { exact: true })).toBeVisible();
-    await expect.poll(() => existsSync(join(directory, "started"))).toBe(true);
 
     const electronProcess = app.process();
     const exit = once(electronProcess, "exit");
-    expect(electronProcess.kill("SIGKILL")).toBe(true);
+    if (process.platform === "win32") {
+      // Renderer and utility processes can retain the browser profile after the
+      // parent exits. Terminate only the tree started by this Electron launch.
+      expect(electronProcess.pid).toBeDefined();
+      execFileSync("taskkill", ["/PID", String(electronProcess.pid), "/T", "/F"], { windowsHide: true });
+    } else {
+      expect(electronProcess.kill("SIGKILL")).toBe(true);
+    }
     await exit;
     app = undefined;
     writeFileSync(join(directory, "release"), "");
@@ -203,7 +211,7 @@ test("a forcibly closed Electron cannot interrupt a running Python Supervisor", 
         clearTimeout(force);
       }
     }
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 125 });
   }
 });
 

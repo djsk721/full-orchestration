@@ -36,6 +36,14 @@ SECRET_FILE = re.compile(
 )
 
 
+def opencode_model_provider(value):
+    if isinstance(value, str) and len(value) <= 200:
+        match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9_.-]*)/[A-Za-z0-9][A-Za-z0-9_.:/-]*", value)
+        if match:
+            return match[1]
+    return None
+
+
 def encode(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
 

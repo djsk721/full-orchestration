@@ -76,4 +76,5 @@ def operator_shell():
 if __name__ == "__main__" and sys.argv[1:2] == ["--slave"]:
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     os.tcsetpgrp(0, os.getpgrp())
-    os.execvpe(sys.argv[2], sys.argv[2:], os.environ)
+    # Some CLI clients use PWD to choose a project even after the PTY child has changed directories.
+    os.execvpe(sys.argv[2], sys.argv[2:], os.environ | {"PWD": os.getcwd()})

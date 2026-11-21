@@ -1,0 +1,9 @@
+# Daily workspace end-to-end verification
+
+The test used disposable Git repositories. The Tk integration exercised project selection, Codex and OpenCode PTYs, both split directions, keyboard focus and session reuse, model selection, file search, local and SSH Git diff, and saved workspace restoration. The terminal fixture provided controlled responses. A separate offline smoke ran the installed OpenCode and Codex binaries together in isolated profile, network and process namespaces. It checked ANSI output, keyboard input, Korean clipboard handling, native terminal sizing, focus, reopening and reaping processes.
+
+The integration submitted a natural-language description and reviewed the generated task plan. The actual Python Supervisor and SQLite owned the run. The loopback model fixture produced deterministic agent responses and a file change. The UI showed active agents, then actual QA output and the candidate SHA in the existing approval screen. Its approved merge landed the exact candidate. Closing the detached task view left the run executing. Existing regression cases checked that stale approval and failed QA cannot merge.
+
+The workspace test includes Git context, task and terminal work in one window. The existing review and permission prompts still open dialogs at approval boundaries. Remote execution was exercised independently through pinned OpenSSH, including recovery after a disconnect. [Installed terminals](../assets/screenshots/orca-workspace/onboarding/installed-cli-split-1920x1080.png) · [Task execution](../assets/screenshots/orca-workspace/onboarding/task-execution-1440x900.png) · [Git approval](../assets/screenshots/orca-workspace/onboarding/git-qa-approval.png)
+
+Run `npm run verify -- --ui --ssh --harness` and, on a Linux host permitting namespaces, `xvfb-run -a python tests/smoke_installed_workspace_cli.py`.

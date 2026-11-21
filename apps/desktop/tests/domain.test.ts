@@ -53,6 +53,18 @@ test("route ranking respects provider roles, context, manual override, and tool 
   assert.deepEqual(rankRoutes(registry, make({ model: "local" })).map(({ harnessId }) => harnessId), ["managed"]);
 });
 
+test("an explicit OpenCode profile must be executable for the requested operation", () => {
+  const registry = parseRegistry({
+    harnesses: { cli: { kind: "opencode", executable: "opencode", trusted: true, allow_unverified: true } },
+    models: { attached: { provider: "subscription", model: "openai/gpt-5.6-luna", harnesses: ["cli"] } },
+  });
+  const task = validatePlan(request("/repo", [node("a", { model: "attached", harness: "cli" })]), registry, "posix").tasks[0]!;
+  assert.equal(rankRoutes(registry, task)[0]?.providerId, "subscription");
+  assert.deepEqual(rankRoutes(registry, { ...task, role: "developer", paths: ["a.txt"] }), []);
+  registry.models.attached!.cli_model = "--prompt";
+  assert.deepEqual(rankRoutes(registry, task), []);
+});
+
 test("model limits use observed identity, context and slots; capabilities are not invented", () => {
   const runtime = parseRegistry(config).runtimes.fixture!;
   const valid = { model: "model-a", context: 4096, slots: 1, output: 800 };

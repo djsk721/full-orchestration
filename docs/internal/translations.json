@@ -108,7 +108,7 @@
         "Background Execution, Session, and Context",
         "Workspace and execution environments"
       ],
-      "sha256": "407fbe6430c302ff16f4067a0851cef8a2c149974e96c35de918fb365475b719"
+      "sha256": "a75ce5e627d3622e1cc83325e9485316999f3e9df80d35f769ed0d202369ae1f"
     },
     "ko": {
       "headings": [
@@ -120,7 +120,7 @@
         "Background Execution, Session 및 Context",
         "워크스페이스와 실행 환경"
       ],
-      "sha256": "c3b30adf9e6950cc386b4cd26fda8623f6e61ff53add0c25e43a653dd95f960c"
+      "sha256": "29fe9fc0061d1d92ad8b8f7fce62fb57eff6bd9a4e269bb7446a15217050c043"
     }
   },
   "developer-guide/documentation.md": {
@@ -379,7 +379,7 @@
         "Troubleshooting",
         "Advanced settings"
       ],
-      "sha256": "ce1a8769bd6320e93f7f28f1e03cae77777b5ef68384d502711015ba31cd4af8"
+      "sha256": "ffc06e198feafdc541b56274e77f4de864fd79141288b494555a5354a19aa067"
     },
     "ko": {
       "headings": [
@@ -390,7 +390,7 @@
         "오류 해결",
         "고급 설정"
       ],
-      "sha256": "4eef8e2c4de99b8a4ffd9913ae4573fa4113aeedf61d97f66813cc3505aedbce"
+      "sha256": "8dd58fa97c073271f6986f27884b1e14561bf41fe60272678c47278a5db1a2b9"
     }
   },
   "user-guide/workspace.md": {

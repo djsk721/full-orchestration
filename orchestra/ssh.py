@@ -12,10 +12,29 @@ from pathlib import Path, PurePosixPath
 
 from .core import Invalid, Temporary, atomic_bytes, encode, ident, require
 from .processes import env_for_process, run
+from .worker_compat import GIT_CAPABILITIES, negotiate_worker
 
 KINDS = ("agent", "key", "agent+key")
 PROTOCOL = 1
 MAX_REQUEST = 400_000
+
+
+class WorkerIncompatible(Invalid):
+    """The Worker cannot use the expected protocol or metadata."""
+
+
+class WorkerFeatureUnavailable(Invalid):
+    """The current Worker does not offer an optional feature."""
+
+
+def worker_compatibility(info):
+    require(isinstance(info, dict), "Remote Worker가 호환되는 응답을 반환하지 않았습니다.")
+    report = negotiate_worker(info, PROTOCOL)
+    if report["state"] == "invalid":
+        raise WorkerIncompatible("Worker 호환성 정보가 올바르지 않습니다.")
+    if report["state"] == "incompatible":
+        raise WorkerIncompatible(f'Worker 프로토콜 {report["min"]}–{report["max"]} · PC 프로토콜 {PROTOCOL}')
+    return report
 
 
 def remote_path(path):
@@ -177,6 +196,18 @@ class SSHClient:
         raw = self._command("uname -s")
         return {"os": raw.decode("utf-8", errors="replace").strip()[:64]}
 
+    def worker_git(self, method, **params):
+        feature = GIT_CAPABILITIES[method]
+        compatibility = worker_compatibility(self.call("info", compatibility_only=True))
+        if feature not in compatibility["capabilities"]:
+            raise WorkerFeatureUnavailable("이 Worker는 Git 보기를 지원하지 않습니다. Worker를 업데이트하세요.")
+        try:
+            return self.call(method, **params)
+        except Invalid as exc:
+            if str(exc) != "지원하지 않는 Worker 요청입니다.":
+                raise
+            raise WorkerFeatureUnavailable("이 Worker는 Git 보기를 지원하지 않습니다. Worker를 업데이트하세요.") from exc
+
     def call(self, method, **params):
         require(self.profile["os"] == "linux", "Remote Worker는 Linux 실행 환경을 지원합니다.")
         directory = remote_path(self.profile.get("worker_dir"))
@@ -189,7 +220,11 @@ class SSHClient:
             value = json.loads(response)
         except (ValueError, UnicodeError) as exc:
             raise Invalid("Remote Worker가 호환되는 응답을 반환하지 않았습니다.") from exc
-        require(isinstance(value, dict) and value.get("version") == PROTOCOL, "원격 Worker 프로토콜 버전이 일치하지 않습니다.")
+        require(isinstance(value, dict), "Remote Worker가 호환되는 응답을 반환하지 않았습니다.")
+        if type(value.get("version")) is not int or value["version"] != PROTOCOL:
+            actual = value.get("version")
+            label = actual if type(actual) is int else "?"
+            raise WorkerIncompatible(f"Worker 프로토콜 {label} · PC 프로토콜 {PROTOCOL}")
         require(value.get("ok"), value.get("error", "원격 Worker 요청이 거절되었습니다."))
         result = value["result"]
         if method == "submit":

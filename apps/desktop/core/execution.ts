@@ -37,6 +37,16 @@ export function rankRoutes(registry: Registry, task: Task): Route[] {
     for (const harnessId of new Set(model.harnesses ?? ["managed"])) {
       const harness = registry.harnesses[harnessId];
       if (!harness || (task.harness !== undefined && task.harness !== harnessId) || !harnessEligible(harness, task)) continue;
+      if (harness.kind !== "managed") {
+        const policy = attachedExecutionPolicy(harness, { runtimeVerified: Boolean(runtime), writes: Boolean(task.paths?.length) });
+        if (!policy.allowed) continue;
+        const cliModel = Object.hasOwn(model, "cli_model") ? model.cli_model : model.model;
+        if (harness.kind === "opencode") {
+          const identifier = runtime ? `orchestralocal/${model.model}` : cliModel;
+          if (runtime?.auth_env || typeof identifier !== "string" || identifier.length > 200 ||
+            !/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.:/-]*$/.test(identifier) || /\s/.test(identifier)) continue;
+        } else if (typeof cliModel !== "string" || !cliModel.trim() || cliModel.startsWith("-") || cliModel.includes("\0")) continue;
+      }
       const score = (model.quality ?? 0) * 3 + (model.reliability ?? 0) * 2 +
         (task.paths?.length || task.tools?.length ? (model.tool_score ?? 0) * 2 : 0) - (model.cost ?? 0);
       found.push({ modelId, providerId: model.provider, runtimeId: model.runtime ?? null, harnessId, score });
