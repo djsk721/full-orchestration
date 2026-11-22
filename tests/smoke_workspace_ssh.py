@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from orchestra.core import Invalid, Temporary
 from orchestra.remote import register_project
 from orchestra.ssh import SSHClient, WorkerFeatureUnavailable, fingerprint, scan_keys, ssh_env, trust_key, worker_compatibility
+from orchestra.ssh_config import local_ssh_hosts
 from orchestra.store import Store
 from orchestra.terminal import Pty
 from orchestra.supervisor import read_config
@@ -100,9 +101,16 @@ AllowUsers {user}
         daemon = subprocess.Popen([executable, "-D", "-e", "-f", str(config)], stderr=handle)
         try:
             wait_for_sshd(daemon)
-            spec = {"name": "Loopback", "host": "127.0.0.1", "port": port, "user": user,
-                    "identity": str(root / "operator"), "auth": "key", "worker_dir": str(source),
-                    "python": sys.executable}
+            ssh_dir = root / ".ssh"
+            ssh_dir.mkdir()
+            (ssh_dir / "config").write_text(
+                f'Host loopback\n HostName 127.0.0.1\n Port {port}\n User {user}\n IdentityFile "{root / "operator"}"\n',
+                encoding="utf-8",
+            )
+            values = local_ssh_hosts(root)["loopback"]
+            assert not values.pop("proxy")
+            spec = values | {"name": "Loopback", "port": int(values["port"]), "auth": "agent+key",
+                             "worker_dir": str(source), "python": sys.executable}
             client = SSHClient(root / "client", "local", spec)
             try:
                 client.test()

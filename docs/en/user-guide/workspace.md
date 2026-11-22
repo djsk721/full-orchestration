@@ -30,9 +30,11 @@ The integrated terminal uses an operator-controlled PTY for local and SSH shells
 1. Prepare Python 3.11 or newer and Git on the remote server. Place the `orchestra/` directory and `ModelOrchestration.pyw` together in the Worker source directory.
 2. As the same server user, run `python3 -m orchestra.remote --register /absolute/path/to/repo` in that directory. This adds the repository to the Worker allowlist. The default Worker data location is the `remote-worker/` subdirectory in the app data path.
 3. Add any required and trusted model settings to the Worker's `registry.json` on the server. To permit file changes add `--allow-background-write` to the registration command. Uploads are separately enabled with `--allow-upload`.
-4. In **Execution Environments → Add SSH host**, enter the host, account, SSH Agent or key path, and Worker source path. Specify a Python 3.11+ interpreter if the server's default is older.
+4. In the Workspace sidebar, open **+ Add → Add SSH host** and select an alias from your `~/.ssh/config`. To add a host manually, enter the username, address, port (default 22), and an optional key file. For Worker access, open **Advanced settings** and enter the Worker source directory and, if needed, the path to a Python 3.11+ interpreter.
 5. Under **Trusted fingerprint**, enter the key fingerprint confirmed with the server administrator over a separate channel. After **Test connection** succeeds, use **Projects → Add remote repository** to select an allowed repository.
 6. Submit a plan in that project. One DAG runs on the selected Linux host. The server Supervisor owns the job if the app or SSH connection closes. Use **Remote runs → Reconnect** to inspect the same execution.
+
+Selecting an alias fills in `HostName`, `User`, `Port`, and the first supported absolute `IdentityFile` path. The app also reads `Include` files within `.ssh`. After editing the original config, reselect the alias in the host editor and save to apply the changes. The app connects directly with its own fingerprint verification. Import skips `ProxyJump`, `ProxyCommand`, `Match`, and forwarding rules.
 
 The project browser can list directories and download regular files up to 200 KB. When enabled and explicitly approved, uploads go to a separate Worker staging directory. Unlock encrypted keys in your SSH Agent before non-interactive API calls. Windows SSH hosts have a shell and connection-test path, with native verification pending.
 

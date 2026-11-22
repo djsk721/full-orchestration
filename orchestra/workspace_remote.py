@@ -14,6 +14,7 @@ from .execution_state import TERMINAL
 from .observability import EVENT_LABELS, agent_rows
 from .remote import MAX_FILE, metrics
 from .ssh import PROTOCOL, SSHClient, pinned_key, scan_keys, trust_key, worker_compatibility
+from .ssh_config import local_ssh_hosts
 from .ui import state_label, t
 from .workspace import put_host, put_project, read_workspace, remove_profile
 from .workspace_forms import Form
@@ -172,18 +173,70 @@ class RemoteWorkspace:
         previous = self.edit_host_profile(key) if key else None
         require(key is None or previous, self.w("편집할 SSH 호스트를 선택하세요."))
         old = previous or {}
-        form = Form(self, self.w("SSH 호스트 편집") if key else self.w("SSH 호스트 추가"),
-                    self.w("SSH Agent 또는 키 파일 경로를 사용합니다. 등록한 뒤 서버의 공개 지문을 확인하세요."))
-        for field, label, default in (
-            ("name", self.w("표시 이름"), ""), ("group", self.w("그룹"), ""), ("host", self.w("호스트/IP"), ""),
-            ("user", self.w("사용자"), ""), ("port", self.w("포트"), "22"), ("identity", self.w("키 파일 경로"), ""),
+        form = Form(self, self.w("SSH 호스트 편집") if key else self.w("SSH 호스트 추가"), width=490)
+        basic = (
+            ("user", self.w("사용자"), ""), ("host", self.w("호스트/IP"), ""),
+            ("port", self.w("포트"), "22"), ("identity", self.w("키 파일 (선택)"), ""),
+        )
+        auto = self.w("자동")
+        aliases = local_ssh_hosts()
+        if aliases:
+            picker = form.field("config_alias", self.w("OpenSSH 설정"), self.w("별칭 선택…"), choices=tuple(aliases))
+            default_hint = self.w("~/.ssh/config의 별칭을 선택하거나 연결 정보를 직접 입력하세요.")
+            hint = form.note(default_hint)
+
+            def select_alias(_):
+                alias = form.get("config_alias")
+                connection = aliases[alias]
+                for field, _, _ in basic:
+                    form.set(field, connection[field])
+                if not previous:
+                    form.set("name", alias)
+                form.set("auth", auto)
+                hint.configure(text=self.w("이 별칭은 경유 서버를 사용합니다. 앱에서 사용할 직접 연결 주소를 확인하세요.")
+                               if connection["proxy"] else default_hint)
+                form.fit_contents()
+
+            picker.bind("<<ComboboxSelected>>", select_alias)
+
+        for field, label, default in basic:
+            form.field(field, label, old.get(field, default))
+
+        advanced_button = ttk.Button(form.body, style="Subtle.TButton")
+        advanced_button.grid(row=form.row, column=0, sticky="w", pady=(6, 2))
+        form.row += 1
+        advanced = (
+            ("name", self.w("표시 이름"), ""), ("group", self.w("그룹"), ""),
             ("directory", self.w("터미널 시작 디렉터리"), ""), ("worker_dir", self.w("Worker 소스 디렉터리"), ""),
             ("timeout", self.w("연결 제한(초)"), "8"), ("python", "Worker Python", "python3"),
-        ):
+        )
+        for field, label, default in advanced:
             form.field(field, label, old.get(field, default))
-        form.field("auth", self.w("공개 키 인증"), old.get("auth", "agent"), choices=("agent", "key", "agent+key"))
+        auth_picker = form.field("auth", self.w("공개 키 인증"), old.get("auth", auto), choices=(auto, "agent", "key", "agent+key"))
+        auth_chosen = False
+
+        def choose_auth(_):
+            nonlocal auth_chosen
+            auth_chosen = True
+
+        auth_picker.bind("<<ComboboxSelected>>", choose_auth)
         form.field("os", self.w("원격 OS"), old.get("os", "linux"), choices=("linux", "windows"))
-        form.note(self.w("Worker 소스 디렉터리에는 서버에 배치한 ModelOrchestration.pyw와 orchestra 폴더가 있어야 합니다."))
+        advanced_note = form.note(self.w("Worker 소스 디렉터리에는 서버에 배치한 ModelOrchestration.pyw와 orchestra 폴더가 있어야 합니다."))
+
+        def show_advanced(visible, *, resize=True):
+            for field in (*[field for field, _, _ in advanced], "auth", "os"):
+                form.set_visible(field, visible)
+            if visible:
+                advanced_note.grid()
+            else:
+                advanced_note.grid_remove()
+            advanced_button.configure(text=self.w("고급 설정 ▴" if visible else "고급 설정 ▾"),
+                                      command=lambda: show_advanced(not visible))
+            if resize:
+                form.fit_contents()
+
+        show_advanced(False, resize=False)
+        form.note(self.w("첫 연결 전에 앱에서 서버 지문을 확인하세요."))
 
         def browse():
             file = filedialog.askopenfilename(parent=form, title=self.w("SSH 개인 키 파일 위치"))
@@ -193,9 +246,19 @@ class RemoteWorkspace:
         self.button(form.footer, self.w("키 파일 선택"), browse)
 
         def save():
-            values = form.values()
-            for field in ("port", "timeout"):
+            values = {field: value.strip() for field, value in form.values().items() if field != "config_alias"}
+            values["port"] = values["port"] or "22"
+            for field, error in (("port", "SSH 포트는 1~65535여야 합니다."),
+                                 ("timeout", "연결 제한 시간은 1~60초입니다.")):
+                require(values[field].isdecimal(), self.w(error))
                 values[field] = int(values[field])
+            if values["host"].startswith("[") and values["host"].endswith("]") and ":" in values["host"]:
+                values["host"] = values["host"][1:-1]
+            values["name"] = values["name"] or values["host"][:100]
+            if values["auth"] == auto or (not auth_chosen and values["identity"] != old.get("identity", "")):
+                values["auth"] = "agent+key" if values["identity"] else "agent"
+            if previous and "worker_dir" not in previous and not values["worker_dir"]:
+                del values["worker_dir"]
             referenced = key is not None and any(item["host"] == key for item in self.store.remote_runs())
             identifier = put_host(self.root, values, key, referenced=referenced)
             form.destroy()
@@ -209,6 +272,7 @@ class RemoteWorkspace:
                 on_saved(identifier)
 
         form.controls(self.w("호스트 저장"), save)
+        form.minsize(460, 260)
 
     def host_trust(self, key=None, *, on_trusted=None):
         key = key or self.selected_host()

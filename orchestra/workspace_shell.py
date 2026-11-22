@@ -768,6 +768,8 @@ class IntegratedWorkspace:
         menu = tk.Menu(self.window, tearoff=False)
         menu.add_command(label=self.w("로컬 Git 저장소"), command=self.add_local_project)
         menu.add_command(label=self.w("원격 Worker의 저장소"), command=self.add_remote_project)
+        menu.add_separator()
+        menu.add_command(label=self.w("SSH 호스트 추가"), command=lambda: self.host_dialog(on_saved=lambda _: self.show("ssh")))
         menu.tk_popup(self.window.winfo_pointerx(), self.window.winfo_pointery())
 
     @staticmethod

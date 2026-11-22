@@ -11,12 +11,21 @@ from smoke_integrated_workspace import (
     WorkspaceDesktop, config, descendants, dialog, fixture_repo, http_fixture, press, save_registry,
     screen, terminal_fixture, terminal_text, wait,
 )
+from orchestra.ssh_config import local_ssh_hosts
 from orchestra.workspace import read_workspace
 
 
 def exercise(output):
     with tempfile.TemporaryDirectory(prefix="orchestra-onboarding-") as temporary, http_fixture() as (_, endpoint):
         root = Path(temporary)
+        local_config = root / ".ssh"
+        local_config.mkdir()
+        ssh_config = local_config / "config"
+        ssh_config.write_text(
+            "Host saved-dev\n HostName dev.example.test\n User deploy\n Port 2222\n IdentityFile ~/.ssh/deploy-key\n",
+            encoding="utf-8",
+        )
+        config_before = ssh_config.read_bytes()
         project = fixture_repo(root / "daily-project").resolve()
         data = root / "settings"
         save_registry(data, config(endpoint))
@@ -25,6 +34,7 @@ def exercise(output):
         window = tk.Tk()
         with patch("orchestra.desktop.start_supervisor"), patch("orchestra.workspace_onboarding.scan_clis", return_value=cli), \
                 patch("orchestra.workspace_sessions.scan_clis", return_value=cli), \
+                patch("orchestra.workspace_remote.local_ssh_hosts", side_effect=lambda: local_ssh_hosts(root)), \
                 patch("tkinter.filedialog.askdirectory", return_value=str(project / "src")):
             app = WorkspaceDesktop(window, data)
             try:
@@ -39,11 +49,37 @@ def exercise(output):
                 assert (data / "registry.json").read_bytes() == before and not app.project_rows()
                 press(form.body, "SSH 호스트 추가")
                 ssh = dialog(window, "SSH 호스트 추가")
-                ssh.set("name", "Optional host fixture")
+                assert not ssh.fields["worker_dir"][1].winfo_ismapped()
+                ssh.set("config_alias", "saved-dev")
+                ssh.fields["config_alias"][1].event_generate("<<ComboboxSelected>>")
+                assert (ssh.get("host"), ssh.get("user"), ssh.get("port"), ssh.get("identity")) == (
+                    "dev.example.test", "deploy", "2222", str(local_config / "deploy-key"))
+                press(ssh.footer, "호스트 저장")
+                assert "saved-dev" in form.get("host")
+                hosts = read_workspace(data)["hosts"]
+                host_id, saved_host = next(iter(hosts.items()))
+                assert saved_host["auth"] == "agent+key" and "config_alias" not in saved_host
+                assert ssh_config.read_bytes() == config_before and not (data / "ssh").exists()
+
+                ssh_config.write_text("Host saved-dev\n HostName dev.example.test\n User deploy\n Port 2200\n", encoding="utf-8")
+                app.host_dialog(host_id)
+                ssh = dialog(window, "SSH 호스트 편집")
+                assert ssh.get("port") == "2222"
+                ssh.set("config_alias", "saved-dev")
+                ssh.fields["config_alias"][1].event_generate("<<ComboboxSelected>>")
+                press(ssh.footer, "호스트 저장")
+                assert read_workspace(data)["hosts"][host_id]["port"] == 2200
+
+                with patch("orchestra.workspace_remote.local_ssh_hosts", return_value={}):
+                    press(form.body, "SSH 호스트 추가")
+                ssh = dialog(window, "SSH 호스트 추가")
+                assert "config_alias" not in ssh.fields and ssh.get("port") == "22"
                 ssh.set("host", "127.0.0.1")
                 ssh.set("user", "fixture")
+                press(ssh.body, "고급 설정 ▾")
+                assert ssh.fields["worker_dir"][1].winfo_ismapped()
                 press(ssh.footer, "호스트 저장")
-                assert "Optional host fixture" in form.get("host")
+                assert "127.0.0.1" in form.get("host")
                 form.set("host", "SSH 사용 안 함")
                 model = next(value for value in form.fields["model"][1]["values"] if value.startswith("model ·"))
                 form.set("model", model)

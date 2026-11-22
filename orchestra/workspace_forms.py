@@ -134,10 +134,13 @@ class Form(tk.Toplevel):
     def controls(self, label, command):
         submit = self.app.button(self.footer, label, lambda: self.app.action(command), True)
         self.app.button(self.footer, self.app.w("닫기"), self.destroy, side="right")
-        self.update_idletasks()
-        self.geometry(f"{self.width + 26}x{min(self.body.winfo_reqheight() + 68, self.winfo_screenheight() - 140, 720)}")
+        self.fit_contents()
         self.minsize(460, 320)
         return submit
+
+    def fit_contents(self):
+        self.update_idletasks()
+        self.geometry(f"{self.width + 26}x{min(self.body.winfo_reqheight() + 68, self.winfo_screenheight() - 140, 720)}")
 
 
 def one_line(values):
