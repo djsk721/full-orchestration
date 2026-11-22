@@ -43,6 +43,7 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         self.remote_pending = set()
         self.host_evidence = {}
         self.host_probes = {}
+        self.host_key_checks = {}
         self.tables = {}
         self.terminals = {}
         self.agent_job = None

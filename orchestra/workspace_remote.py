@@ -13,7 +13,7 @@ from .desktop import formatted
 from .execution_state import TERMINAL
 from .observability import EVENT_LABELS, agent_rows
 from .remote import MAX_FILE, metrics
-from .ssh import PROTOCOL, SSHClient, pinned_key, scan_keys, trust_key, worker_compatibility
+from .ssh import PROTOCOL, SSHClient, pinned_key, scan_keys, trust_key, validate_profile, worker_compatibility
 from .ssh_config import local_ssh_hosts
 from .ui import state_label, t
 from .workspace import put_host, put_project, read_workspace, remove_profile
@@ -79,14 +79,9 @@ class RemoteWorkspace:
         hosts = read_workspace(self.root)["hosts"]
         rows = []
         for key, profile in hosts.items():
-            saved = self.host_evidence.get(key, {})
             pin = pinned_key(self.root, key, profile)
             pin_state = self.w("등록됨") if pin else self.w("등록 필요")
-            last = self.w("Worker 연결 성공") if saved.get("worker") else self.w("SSH 연결 성공") if saved.get("ssh") else self.w("미확인")
-            if saved.get("error"):
-                last = self.w("연결 실패")
-            if key in self.host_probes:
-                last = self.w("연결 확인 중…")
+            last = self.host_connection_status(key, pin)
             rows.append((key, (profile["name"], f'{profile["user"]}@{profile["host"]}:{profile["port"]}', profile["os"], pin_state, last)))
         selected = self.ssh_list.selection()
         self.fill(self.ssh_list, rows, selected[0] if selected else None)
@@ -98,9 +93,7 @@ class RemoteWorkspace:
         return selected[0]
 
     def _test_ssh_host(self):
-        key = self._selected_ssh_host()
-        self.hosts_list.selection_set(key)
-        self.test_saved_host(key)
+        self.test_saved_host(self._selected_ssh_host())
 
     def worker_upgrade_guidance(self):
         messagebox.showinfo(
@@ -110,9 +103,7 @@ class RemoteWorkspace:
         )
 
     def _trust_ssh_host(self):
-        key = self._selected_ssh_host()
-        self.hosts_list.selection_set(key)
-        self.host_trust()
+        self.host_trust(self._selected_ssh_host())
 
     def _ssh_host_terminal(self):
         self.open_ssh_terminal(self._selected_ssh_host())
@@ -135,10 +126,14 @@ class RemoteWorkspace:
             self.w("표시 이름     {0}  (그룹: {1})", profile['name'], profile.get('group') or '—'),
             self.w("연결 대상     {0}@{1}:{2} · {3}", profile['user'], profile['host'], profile['port'], profile['os']),
             self.w("인증 방식     {0}", profile.get('auth', 'agent')),
-            self.w("신뢰 지문     {0}", (pin[1] if pin else self.w("등록 필요 (신뢰 지문 버튼으로 확인)"))),
+            self.w("신뢰 지문     {0}", pin[1] if pin else self.w("등록 필요")),
             self.w("Worker 경로   {0}", profile.get('worker_dir') or '—'),
         ]
-        if key in self.host_probes:
+        if key in self.host_key_checks:
+            lines += ["", self.w("서버 지문 확인 중…")]
+        elif not pin:
+            lines += ["", self.w("연결 테스트를 누르고 서버 관리자가 확인한 지문을 입력하세요.")]
+        elif key in self.host_probes:
             lines += ["", self.w("연결 확인 중…")]
         elif saved:
             lines += ["", self.worker_connection_summary(saved)]
@@ -146,14 +141,25 @@ class RemoteWorkspace:
         lines += ["", self.w("Worker 상태는 마지막 연결 테스트에서 관측한 결과입니다. 연결 테스트를 눌러 다시 확인할 수 있습니다.")]
         self.write(self.ssh_details, "\n".join(lines), True)
 
+    def host_connection_status(self, key, pin):
+        if key in self.host_key_checks:
+            return self.w("서버 지문 확인 중…")
+        if not pin:
+            return self.w("지문 등록 필요")
+        if key in self.host_probes:
+            return self.w("연결 확인 중…")
+        saved = self.host_evidence.get(key, {})
+        if saved.get("error"):
+            return self.w("연결 실패")
+        if saved.get("worker"):
+            return self.w("Worker 연결 성공")
+        return self.w("SSH 연결 성공" if saved.get("ssh") else "미확인")
+
     def refresh_hosts(self):
         hosts = read_workspace(self.root)["hosts"]
         rows = [("local", (self.w("이 PC"), self.w("로컬"), "—", self.w("사용 가능")))]
         for key, profile in hosts.items():
-            saved = self.host_evidence.get(key, {})
-            last = self.w("최근 Worker 연결 성공") if saved.get("worker") else self.w("최근 SSH 연결 성공") if saved.get("ssh") else self.w("미확인")
-            if saved.get("error"):
-                last = self.w("연결 실패")
+            last = self.host_connection_status(key, pinned_key(self.root, key, profile))
             rows.append((key, (profile["name"], profile.get("group", "") or "—", profile["os"], last)))
         selected = self.hosts_list.selection()
         self.fill(self.hosts_list, rows, selected[0] if selected else None)
@@ -274,31 +280,60 @@ class RemoteWorkspace:
         form.controls(self.w("호스트 저장"), save)
         form.minsize(460, 260)
 
-    def host_trust(self, key=None, *, on_trusted=None):
+    def host_trust(self, key=None, *, on_trusted=None, on_untrusted=None):
         key = key or self.selected_host()
-        client = self.ssh(key)
-        self.write(self.host_details, self.w("서버에서 공개 키를 조회하는 중입니다…"), True)
+        profile = self.ssh(key).profile
+        if key in self.host_key_checks:
+            self.host_key_checks[key].append((on_trusted, on_untrusted))
+            return
+        callbacks = [(on_trusted, on_untrusted)]
+        self.host_key_checks[key] = callbacks
+        self.refresh_hosts()
+        self.render_host()
 
-        def confirm(candidates):
-            profile = client.profile
+        def scan():
+            try:
+                return scan_keys(profile), None
+            except (ValueError, OSError, RuntimeError) as error:
+                return {}, error
+
+        def profile_is_current():
+            current = self.edit_host_profile(key)
+            return current is not None and validate_profile(current) == profile
+
+        def confirm(result):
+            candidates, error = result
+            if error:
+                raise error
+            if not profile_is_current():
+                return False
             before = pinned_key(self.root, key, profile)
             details = "\n".join(f"{fingerprint}   {data[0]}" for fingerprint, data in candidates.items())
             previous = self.w("\n기존에 신뢰한 지문  {0}", before[1]) if before else ""
             value = simpledialog.askstring(
                 self.w("SSH 호스트 지문 확인"),
-                self.w("{0}{1}\n\n서버가 공개한 후보\n{2}\n\n서버 관리자 등 독립 경로로 확인한 지문을 입력하세요.", profile['name'], previous, details),
+                self.w("{0}{1}\n\n서버가 공개한 후보\n{2}\n\n서버 관리자 등 독립 경로로 확인한 지문을 입력하세요.",
+                       f'{profile["name"]} · {profile["user"]}@{profile["host"]}:{profile["port"]}', previous, details),
                 parent=self.window,
             )
-            if value:
-                def save_pin():
-                    trust_key(self.root, key, profile, value.strip(), candidates)
-                    if on_trusted:
-                        on_trusted()
-                self.action(save_pin)
-            self.render_host()
-            self.refresh_ssh()
+            if not value or not profile_is_current():
+                return False
+            trust_key(self.root, key, profile, value.strip(), candidates)
+            return True
 
-        self.background(lambda: scan_keys(client.profile), confirm)
+        def done(result):
+            try:
+                trusted = self.action(lambda: confirm(result))
+            finally:
+                del self.host_key_checks[key]
+                self.refresh_hosts()
+                self.render_host()
+            for success, incomplete in callbacks:
+                callback = success if trusted else incomplete
+                if callback:
+                    callback()
+
+        self.background(scan, done)
 
     def measure_gpu(self):
         self.selected_host()
@@ -315,6 +350,10 @@ class RemoteWorkspace:
 
     def test_saved_host(self, key, *, gpu=False, on_result=None):
         client = self.ssh(key)
+        if not pinned_key(self.root, key, client.profile):
+            self.host_trust(key, on_trusted=lambda: self.test_saved_host(key, gpu=gpu, on_result=on_result),
+                            on_untrusted=(lambda: on_result({"trust_required": True})) if on_result else None)
+            return
         existing = self.host_probes.get(key)
         if existing and existing[0] == client.profile and existing[1] == gpu:
             if on_result:
@@ -357,6 +396,8 @@ class RemoteWorkspace:
         self.background(measure, done)
 
     def worker_connection_summary(self, evidence):
+        if evidence.get("trust_required"):
+            return self.w("지문 등록 필요")
         if evidence.get("error"):
             return self.workspace_error(evidence["error"])
         if evidence.get("worker_error"):
@@ -397,6 +438,11 @@ class RemoteWorkspace:
             description = (
                 self.w("{0}@{1}:{2} · {3}\n신뢰 지문   {4}\nWorker 경로   {5}", profile['user'], profile['host'], profile['port'], profile['os'], (pin[1] if pin else self.w('등록 필요')), profile.get('worker_dir') or '—')
             )
+            if not pin:
+                status = self.w("서버 지문 확인 중…" if key in self.host_key_checks
+                                else "연결 테스트를 누르고 서버 관리자가 확인한 지문을 입력하세요.")
+                self.write(self.host_details, description + "\n\n" + status, True)
+                return
         if "worker" in saved:
             heartbeat = saved["worker"]["heartbeat"]
             observed = self.w("미관측") if heartbeat is None else datetime.fromtimestamp(heartbeat).strftime("%Y-%m-%d %H:%M:%S")

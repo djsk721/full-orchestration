@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orchestra.platform.command_line import format_commands
 from orchestra.remote import register_project
-from orchestra.ssh import fingerprint, scan_keys, trust_key
+from orchestra.ssh import fingerprint, pin_path
 from orchestra.store import Store
 from orchestra.workspace import STRATEGIES, inspect_project, put_host, put_project, save_registry
 from orchestra.workspace_desktop import WorkspaceDesktop
@@ -238,12 +238,8 @@ AllowUsers {user}
                        "user": user, "identity": str(root / "operator"), "auth": "key",
                        "directory": str(project), "os": "linux", "worker_dir": str(source), "python": sys.executable}
             host = put_host(data, profile)
-            algorithm, public_key, *_ = (root / "host.pub").read_text().split()
-            expected = fingerprint(public_key)
-            observed = scan_keys(profile)
-            assert observed[expected] == (algorithm, public_key)
-            trust_key(data, host, profile, expected, observed)
-            yield host
+            _, public_key, *_ = (root / "host.pub").read_text().split()
+            yield host, fingerprint(public_key)
         finally:
             if daemon.poll() is None:
                 daemon.terminate()
@@ -570,7 +566,31 @@ def exercise(args, window, app, store, root, repository, first_id, second_id, se
     (repository / "src" / "workflow.py").write_text("print('original workflow')\n", encoding="utf-8")
     (repository / ".env").unlink()
     if args.ssh:
-        with ssh_profile(root / "ssh-fixture", app.root, repository) as host:
+        with ssh_profile(root / "ssh-fixture", app.root, repository) as (host, expected):
+            app.show("ssh")
+            app.ssh_list.selection_set(host)
+            assert app.ssh_list.set(host, "status") == "지문 등록 필요"
+            pin = pin_path(app.root, host)
+            with patch("orchestra.workspace_remote.simpledialog.askstring", return_value=None) as fingerprint_dialog:
+                press(app.pages["ssh"], "연결 테스트")
+                press(app.pages["ssh"], "연결 테스트")
+                assert app.ssh_list.set(host, "status") == "서버 지문 확인 중…"
+                wait(window, lambda: host not in app.host_key_checks, "SSH fingerprint scan did not finish")
+                assert fingerprint_dialog.call_count == 1 and not pin.exists() and host not in app.host_probes
+            assert app.ssh_list.set(host, "status") == "지문 등록 필요"
+
+            with patch("orchestra.workspace_remote.simpledialog.askstring", return_value="SHA256:wrong"), \
+                    patch("orchestra.desktop.messagebox.showerror") as error:
+                press(app.pages["ssh"], "연결 테스트")
+                wait(window, lambda: host not in app.host_key_checks, "SSH fingerprint mismatch did not finish")
+                assert error.call_count == 1 and not pin.exists() and host not in app.host_probes
+
+            with patch("orchestra.workspace_remote.simpledialog.askstring", return_value=expected) as fingerprint_dialog:
+                press(app.pages["ssh"], "연결 테스트")
+                wait(window, lambda: app.ssh_list.set(host, "status") == "Worker 연결 성공",
+                     "connection test did not resume after fingerprint confirmation")
+                assert expected in fingerprint_dialog.call_args.args[1] and pin.is_file()
+
             remote_tab = app.open_ssh_terminal(host)
             assert app.terminal_tabs[remote_tab].recipes[0].project is None, "unrelated local project was assigned to SSH"
             remote_panel = app.terminals[remote_tab][1][0]
