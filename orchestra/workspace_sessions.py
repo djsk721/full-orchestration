@@ -337,8 +337,8 @@ class WorkspaceSessions:
             self.terminal_book.hide(tab.frame)
             self._terminal_changed()
 
-    def close_terminal_view(self):
-        key = self.terminal_book.select()
+    def close_terminal_view(self, key=None):
+        key = key or self.terminal_book.select()
         tab = self.terminal_tabs.get(key)
         if not tab:
             return

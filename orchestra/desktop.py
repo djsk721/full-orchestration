@@ -21,6 +21,7 @@ from .supervisor import read_config, start_supervisor
 from .ui import (
     NAV_GROUPS,
     Card,
+    NavRow,
     StatusBadge,
     THEMES,
     apply_ttk_theme,
@@ -33,7 +34,7 @@ from .ui import (
 from .ui.strings import STATES_I18N
 from .ui.workspace_strings import WORKSPACE_EN, workspace_text
 
-_DEFAULT_PALETTE = THEMES["dark"]
+_DEFAULT_PALETTE = THEMES["light"]
 BG, PANEL = _DEFAULT_PALETTE["canvas"], _DEFAULT_PALETTE["panel"]
 TEXT, MUTED = _DEFAULT_PALETTE["text"], _DEFAULT_PALETTE["muted"]
 NAV, NAV_ACTIVE, BLUE = _DEFAULT_PALETTE["sidebar"], _DEFAULT_PALETTE["active"], _DEFAULT_PALETTE["accent"]
@@ -87,6 +88,7 @@ class Desktop:
         self.nav_indicators = {}
         self._text_widgets = []
         self._themed_cards = []
+        self._themed_widgets = []
         self.window.title("Model Orchestration")
         self.window.geometry("1280x820")
         self.window.minsize(920, 630)
@@ -98,8 +100,20 @@ class Desktop:
             self.notifications = read_config(self.root)["settings"].get("notifications", False)
         except (OSError, ValueError, TypeError):
             pass
-        self.show(self.initial_page)
+        if not self.view:
+            self.show(self.initial_page)
         self.tick()
+
+    def track_themed(self, widget, *, bg_key="panel", fg_key=None, border_key=None):
+        """Register a classic tk widget for automatic light/dark palette updates."""
+        entry = (widget, bg_key, fg_key, border_key)
+        self._themed_widgets.append(entry)
+        widget.bind(
+            "<Destroy>",
+            lambda _e, item=entry: self._themed_widgets.remove(item) if item in self._themed_widgets else None,
+            add="+",
+        )
+        return widget
 
     def _prefs_path(self) -> Path:
         return self.root / "ui_prefs.json"
@@ -115,7 +129,7 @@ class Desktop:
 
     def _load_theme_pref(self) -> str:
         theme = self._read_ui_prefs().get("theme")
-        return theme if isinstance(theme, str) and theme in THEMES else "dark"
+        return theme if isinstance(theme, str) and theme in THEMES else "light"
 
     def save_ui_prefs(self, **values):
         atomic_json(self._prefs_path(), self._read_ui_prefs() | values)
@@ -148,31 +162,58 @@ class Desktop:
 
     def apply_theme_widgets(self):
         p = self.palette
-        if hasattr(self, "nav_frame"):
+        if hasattr(self, "nav_frame") and self.nav_frame.winfo_exists():
             self.nav_frame.configure(bg=p["sidebar"], highlightbackground=p["sidebar_border"])
-            self.brand_box.configure(bg=p["sidebar"])
-            self.brand_title.configure(bg=p["sidebar"], fg=p["text"] if self.theme_name == "light" else "#ffffff")
-            self.brand_sub.configure(bg=p["sidebar"], fg=p["nav_muted"])
-            self.nav_scroll_canvas.configure(bg=p["sidebar"])
-            self.nav_inner.configure(bg=p["sidebar"])
+            if hasattr(self, "brand_box") and self.brand_box.winfo_exists():
+                self.brand_box.configure(bg=p["sidebar"])
+            if hasattr(self, "brand_title") and self.brand_title.winfo_exists():
+                self.brand_title.configure(bg=p["sidebar"], fg=p["text"])
+            if hasattr(self, "brand_sub") and self.brand_sub.winfo_exists():
+                self.brand_sub.configure(bg=p["sidebar"], fg=p["nav_muted"])
+            if hasattr(self, "nav_scroll_canvas") and self.nav_scroll_canvas.winfo_exists():
+                self.nav_scroll_canvas.configure(bg=p["sidebar"])
+                self.nav_inner.configure(bg=p["sidebar"])
             for lbl in getattr(self, "_nav_group_labels", []):
-                lbl.configure(bg=p["sidebar"], fg=p["nav_muted"])
+                if lbl.winfo_exists():
+                    lbl.configure(bg=p["sidebar"], fg=p["nav_muted"])
             for key, row in getattr(self, "nav_rows", {}).items():
-                active = key == self.view
-                bg = p["active"] if active else p["sidebar"]
-                fg = p["nav_active_fg"] if active else p["nav_fg"]
-                row.configure(bg=bg)
-                self.nav_buttons[key].configure(bg=bg, fg=fg, activebackground=p["hover"], activeforeground=p["nav_active_fg"])
-                self.nav_indicators[key].configure(bg=p["accent"] if active else bg)
-            self.sidebar_footer.configure(bg=p["sidebar"], highlightbackground=p["sidebar_border"])
-            self.status.configure(bg=p["sidebar"], fg=p["muted"])
-        if hasattr(self, "header_bar"):
+                if isinstance(row, NavRow):
+                    row.apply_palette(p)
+                else:
+                    active = key == self.view
+                    bg = p["active"] if active else p["sidebar"]
+                    fg = p["nav_active_fg"] if active else p["nav_fg"]
+                    row.configure(bg=bg)
+                    self.nav_buttons[key].configure(bg=bg, fg=fg, activebackground=p["hover"], activeforeground=p["nav_active_fg"])
+                    self.nav_indicators[key].configure(bg=p["accent"] if active else bg)
+            if hasattr(self, "sidebar_footer") and self.sidebar_footer.winfo_exists():
+                self.sidebar_footer.configure(bg=p["sidebar"], highlightbackground=p["sidebar_border"])
+                self.status.configure(bg=p["sidebar"], fg=p["muted"])
+        if hasattr(self, "header_bar") and self.header_bar.winfo_exists():
             self.header_bar.configure(bg=p["header"], highlightbackground=p["border"])
-            self.header_left.configure(bg=p["header"])
-            self.header_right.configure(bg=p["header"])
-            if hasattr(self, "theme_btn"):
+            if hasattr(self, "header_left") and self.header_left.winfo_exists():
+                self.header_left.configure(bg=p["header"])
+            if hasattr(self, "header_right") and self.header_right.winfo_exists():
+                self.header_right.configure(bg=p["header"])
+            if hasattr(self, "theme_btn") and self.theme_btn.winfo_exists():
                 label = t("header.theme_light", self.locale) if self.theme_name == "dark" else t("header.theme_dark", self.locale)
                 self.theme_btn.configure(text=label)
+        if hasattr(self, "status_bar") and self.status_bar.winfo_exists():
+            self.status_bar.configure(bg=p["status_bar"], highlightbackground=p["status_border"])
+        for entry in list(getattr(self, "_themed_widgets", ())):
+            widget, bg_key, fg_key, border_key = entry
+            if not widget.winfo_exists():
+                self._themed_widgets.remove(entry)
+                continue
+            opts = {}
+            if bg_key:
+                opts["bg"] = p[bg_key]
+            if fg_key:
+                opts["fg"] = p[fg_key]
+            if border_key:
+                opts["highlightbackground"] = p[border_key]
+            if opts:
+                widget.configure(**opts)
         for widget in list(self._text_widgets):
             if widget.winfo_exists():
                 style_text_widget(widget, p, self.mono_font)
@@ -369,12 +410,12 @@ class Desktop:
             self.refresh_jobs()
 
     def base(self, title, description):
-        frame = ttk.Frame(self.host)
+        frame = ttk.Frame(self.host, padding=(14, 10, 14, 10))
         frame.columnconfigure(0, weight=1)
-        ttk.Label(frame, text=title, style="Heading.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(frame, text=title, style="PageHeading.TLabel").grid(row=0, column=0, sticky="w")
         caption = ttk.Label(frame, text=description, style="Subheading.TLabel", justify="left")
-        caption.grid(row=1, column=0, sticky="ew", pady=(3, 12))
-        frame.bind("<Configure>", lambda event: caption.configure(wraplength=max(200, event.width - 8)), add="+")
+        caption.grid(row=1, column=0, sticky="ew", pady=(2, 8))
+        frame.bind("<Configure>", lambda event: caption.configure(wraplength=max(200, event.width - 28)), add="+")
         return frame
 
     @staticmethod
@@ -1011,6 +1052,15 @@ class Desktop:
                     start_supervisor(self.root)
             if self.view == "jobs" or self.notifications:
                 self.refresh_jobs()
+            elif hasattr(self, "header_notice_badge"):
+                pending_count = sum(1 for row in self.store.list_jobs() if row["state"] in ("AWAITING_TOOL", "AWAITING_APPROVAL"))
+                self.header_notice_badge.set_status(
+                    self.w("승인 {0}", pending_count) if pending_count else self.w("대기 0") if self.locale == "ko" else "0",
+                    tone="warning" if pending_count else "neutral",
+                    palette=self.palette,
+                )
+            if hasattr(self, "workspace_update_runtime_footer"):
+                self.workspace_update_runtime_footer()
             while not self.results.empty():
                 callback, result, error = self.results.get_nowait()
                 if error:

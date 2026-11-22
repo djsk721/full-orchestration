@@ -70,6 +70,11 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
             canvas = getattr(self, canvas_attr, None)
             if canvas and canvas.winfo_exists():
                 canvas.configure(bg=p["graph_bg"])
+        for item in getattr(self, "workspace_tabs", {}).values():
+            dag = item.get("dag")
+            if dag and dag.winfo_exists():
+                dag.configure(bg=p["graph_bg"])
+            item.pop("graph_key", None)
         self.graph_version = None
         self._detail_dag_version = None
         if hasattr(self, "header_env_badge"):
@@ -87,9 +92,11 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         for _, terminals in self.terminals.values():
             for terminal in terminals:
                 terminal.apply_palette(p)
+        if hasattr(self, "_update_nav_highlight"):
+            self._update_nav_highlight(self.view)
         if self.view == "workspace":
             self.refresh_workspace()
-        if self.view == "home":
+        elif self.view == "home":
             self.refresh_home()
         elif self.view == "jobs":
             self.refresh_jobs()
@@ -120,31 +127,16 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         )
 
     def layout(self):
-        super().layout()
-        p = self.palette
-        tk.Label(
-            self.header_left, text=self.w("프로젝트"), bg=p["header"], fg=p["muted"],
-            font=(self.ui_font, 9, "bold"),
-        ).pack(side="left", padx=(0, 8))
-        self.sidebar_project = tk.StringVar(self.window, t("header.project_unselected", self.locale))
-        self.sidebar_picker = ttk.Combobox(self.header_left, textvariable=self.sidebar_project, state="readonly", width=17)
-        self.sidebar_picker.pack(side="left", padx=(0, 8))
-        self.sidebar_picker.bind("<<ComboboxSelected>>", self.pick_sidebar)
-
-        self.header_env_badge = StatusBadge(self.header_left, p, text=self.host_name(None),
-                                            tone="neutral", ui_font=self.ui_font)
-        self.header_env_badge.pack(side="left")
-
-        self.build_workspace_sidebar()
+        # Build the single authoritative Orca workspace shell (never Desktop's legacy dual shell).
+        self.build_unified_shell()
         self.restore_workspace()
         self.window.bind("<Control-k>", lambda _: self.workspace_command_palette())
         self.window.bind("<Control-n>", lambda _: self.workspace_new_task() if self.view == "workspace" else self.show("submit"))
         self.window.bind("<Control-t>", lambda _: self.action(self.local_project_shell))
         self.window.bind("<Control-p>", lambda _: self.workspace_find_file())
-        self.window.bind("<Control-Tab>", lambda _: self.workspace_switch_tab(1) if self.view == "workspace" else None)
+        self.window.bind("<Control-Tab>", lambda _: self.workspace_switch_tab(1))
         def previous_tab(_):
-            if self.view == "workspace":
-                self.workspace_switch_tab(-1)
+            self.workspace_switch_tab(-1)
 
         self.window.bind("<Control-Shift-Tab>", previous_tab)
         if self.window.tk.call("tk", "windowingsystem") == "x11":
@@ -182,38 +174,33 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
 
     def pick_sidebar(self, _=None):
         key = self.sidebar_items.get(self.sidebar_project.get())
-        if key:
-            if self.view == "workspace":
-                self.select_workspace_project(key)
-                return
-            self.project_id = key
-            self.update_header_context()
-            if self.view == "submit" and hasattr(self, "_wizard_sync_projects"):
-                self._wizard_sync_projects()
-            else:
-                self.show("projects")
-                self.open_project(key)
+        if not key:
+            return
+        self.project_id = key
+        self.update_header_context()
+        self.refresh_workspace()
+        if self.view == "submit" and hasattr(self, "_wizard_sync_projects"):
+            self._wizard_sync_projects()
+        elif self.view == "projects":
+            self.open_project(key)
+        self.workspace_save_later()
 
-    def show(self, key):
-        if key == "registry" and not self.registry.get("1.0", "end-1c").strip():
-            self.action(self.reload_registry)
-        super().show(key)
-        self.workspace_show(key == "workspace")
-        work = {
-            "home": self.refresh_home,
-            "projects": self.refresh_projects,
-            "agents": self.refresh_agents,
-            "dag": self.refresh_graph,
-            "hosts": self.refresh_hosts,
-            "ssh": self.refresh_ssh,
-            "providers": self.refresh_providers,
-            "history": self.refresh_history,
-            "settings": self.refresh_settings,
-            "remote_runs": self.refresh_remote,
-            "submit": self._wizard_sync_projects,
-        }.get(key)
-        if work:
-            self.action(work)
+    def show(self, key, *, keep_tab=False):
+        self.view = key
+        self._update_nav_highlight(key)
+        if key == "workspace":
+            if not keep_tab and hasattr(self, "workspace_overview") and str(self.workspace_overview) in self.workspace_book.tabs():
+                self.workspace_book.select(self.workspace_overview)
+            self.refresh_workspace()
+        else:
+            frame = self.pages[key]
+            if str(frame) not in self.workspace_book.tabs():
+                self.workspace_book.add(frame, text=self._route_tab_title(key))
+            self.workspace_book.select(frame)
+            self._run_route_refresh(key)
+        self.workspace_update_runtime_footer()
+        self.update_header_context()
+        self.workspace_save_later()
 
     def fill(self, table, rows, selected=None):
         current = tuple((key, tuple(map(str, data))) for key, data in rows)
@@ -247,8 +234,11 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
                     self.refresh_history()
                 elif self.view == "remote_runs" and self.remote_selected:
                     self.pull_remote()
-                elif self.view == "workspace":
+                if self.view == "workspace":
                     self.refresh_workspace()
+                elif hasattr(self, "workspace_tree"):
+                    self.refresh_workspace_sidebar()
+                self.workspace_update_runtime_footer()
                 self.update_header_context()
             except (ValueError, OSError, RuntimeError, TypeError, KeyError):
                 pass
@@ -474,32 +464,34 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
     # ------------------------------------------------------------------
     def jobs_page(self):
         frame = self.base(t("jobs.title", self.locale), t("jobs.desc", self.locale))
-        frame.rowconfigure(3, weight=1)
+        frame.rowconfigure(4, weight=1)
 
         bar = ttk.Frame(frame)
-        bar.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        bar.grid(row=2, column=0, sticky="ew", pady=(0, 4))
         self.button(bar, self.w("새 작업"), lambda: self.show("submit"), True)
         self.button(bar, self.w("중지"), lambda: self.job_action("cancel"))
         self.button(bar, self.w("재시도"), lambda: self.job_action("retry"))
         self.button(bar, self.w("도구 승인 검토"), self.tool_decision)
         self.button(bar, self.w("병합 승인"), lambda: self.job_action("merge"))
         self.job_controls = {button.cget("text"): button for button in bar.winfo_children() if isinstance(button, ttk.Button)}
+        self.button(bar, self.w("원격 작업"), lambda: self.show("remote_runs"), side="right")
 
+        filter_bar = ttk.Frame(frame)
+        filter_bar.grid(row=3, column=0, sticky="ew", pady=(0, 6))
         self.job_filter_var = tk.StringVar(self.window, "")
         self.job_filter_var.trace_add("write", lambda *_: self.refresh_jobs())
-        self.button(bar, self.w("원격 작업"), lambda: self.show("remote_runs"), side="right")
-        ttk.Entry(bar, textvariable=self.job_filter_var, width=18).pack(side="right", padx=(4, 8), pady=3)
-        ttk.Label(bar, text=self.w("검색"), style="Muted.TLabel").pack(side="right", padx=(6, 0))
+        ttk.Label(filter_bar, text=self.w("검색"), style="Muted.TLabel").pack(side="left", padx=(0, 6))
+        ttk.Entry(filter_bar, textvariable=self.job_filter_var, width=26).pack(side="left")
 
         split = ttk.Panedwindow(frame, orient="horizontal")
-        split.grid(row=3, column=0, sticky="nsew")
+        split.grid(row=4, column=0, sticky="nsew")
 
         left = ttk.Frame(split, padding=(0, 0, 8, 0))
         left.columnconfigure(0, weight=1)
         left.rowconfigure(0, weight=1)
         self.jobs = self.table(
             left, 0,
-            (("title", self.w("작업"), 170), ("state", self.w("상태"), 92), ("mode", self.w("모드"), 76), ("updated", self.w("갱신"), 86)),
+            (("title", self.w("작업"), 130), ("state", self.w("상태"), 84), ("mode", self.w("모드"), 62), ("updated", self.w("갱신"), 72)),
             height=12,
         )
         self.jobs.bind("<<TreeviewSelect>>", self.job_selected)
@@ -531,7 +523,12 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         self.detail_title = ttk.Label(title_row, text=self.w("작업 상세"), style="CardTitle.TLabel", wraplength=440, justify="left", anchor="w")
         self.detail_title.pack(side="left", fill="x", expand=True)
         self.detail_evidence = ttk.Label(header_card.body, text="", style="Card.TLabel", wraplength=540, justify="left", anchor="w")
-        self.detail_evidence.pack(fill="x", pady=(6, 0))
+        self.detail_evidence.pack(fill="x", pady=(6, 2))
+        header_card.body.bind(
+            "<Configure>",
+            lambda event: self.detail_evidence.configure(wraplength=max(240, event.width - 12)),
+            add="+",
+        )
 
         self.detail_book = ttk.Notebook(right)
         self.detail_book.grid(row=1, column=0, sticky="nsew")
@@ -599,7 +596,9 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         self._themed_cards.append(app_card)
         app_top = tk.Frame(app_card.body, bg=p["panel"])
         app_top.pack(fill="x")
-        tk.Label(app_top, text=self.w("Git & QA 병합 승인 상태"), bg=p["panel"], fg=p["text"], font=(self.ui_font, 11, "bold")).pack(side="left")
+        app_title = tk.Label(app_top, text=self.w("Git & QA 병합 승인 상태"), bg=p["panel"], fg=p["text"], font=(self.ui_font, 11, "bold"))
+        app_title._theme_fg = "text"
+        app_title.pack(side="left")
         self.inline_approval_badge = StatusBadge(app_top, p, text=self.w("QA 대기"), tone="neutral", ui_font=self.ui_font)
         self.inline_approval_badge.pack(side="right")
         self.inline_approval_info = self.text(t6, 1)
@@ -652,7 +651,7 @@ class WorkspaceDesktop(WorkspaceOnboarding, IntegratedWorkspace, WorkspaceSessio
         pending_count = sum(1 for st in current_states.values() if st in ("AWAITING_TOOL", "AWAITING_APPROVAL"))
         if hasattr(self, "header_notice_badge"):
             self.header_notice_badge.set_status(
-                self.w("승인 대기 {0}", pending_count) if pending_count else self.w("알림 0"),
+                self.w("승인 {0}", pending_count) if pending_count else ("대기 0" if self.locale == "ko" else "0"),
                 tone="warning" if pending_count else "neutral",
                 palette=self.palette,
             )

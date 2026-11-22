@@ -3,6 +3,14 @@ from __future__ import annotations
 
 LOCALES = ("ko", "en")
 
+PRIMARY_NAV = (
+    ("workspace", "nav.workspace", "▣"),
+    ("jobs", "nav.jobs", "≡"),
+    ("agents", "nav.agents", "◈"),
+    ("projects", "nav.projects", "▤"),
+    ("settings", "nav.settings", "◎"),
+)
+
 NAV_GROUPS = (
     ("WORKSPACE", (
         ("workspace", "nav.workspace"),
@@ -125,6 +133,10 @@ STRINGS = {
         "wizard.perm_git": "Git 병합 보호: 통합 QA를 통과한 정확한 후보 SHA를 사용자가 승인할 때만 대상 브랜치에 병합합니다.",
         "provider.simple_hint": "Provider 종류와 로컬 Runtime 주소를 설정한 뒤 연결을 확인하고 모델을 선택합니다.",
         "provider.advanced_hint": "고급 모드에서는 환경 변수 이름(비밀값 미저장), 실행 파일 경로 및 Context 한도를 조정합니다.",
+        "settings.hub_title": "관리 및 연동 도구",
+        "settings.hub_desc": "Provider, SSH 서버, 실행 환경, MCP 연결 및 실행 기록을 통합 작업 공간 탭에서 엽니다.",
+        "settings.language": "표시 언어",
+        "nav.search_placeholder": "검색 (Ctrl+K)",
     },
     "en": {
         "app.brand": "Model Orchestration",
@@ -189,6 +201,10 @@ STRINGS = {
         "wizard.perm_git": "Git merge protection: fast-forwards only after QA passes and the exact candidate SHA is approved.",
         "provider.simple_hint": "Set the Provider type and local runtime URL, then test the connection and select a model.",
         "provider.advanced_hint": "Advanced mode sets an authentication variable name, executable, and context limit. Secret values stay outside the form.",
+        "settings.hub_title": "Administration & Integrations",
+        "settings.hub_desc": "Open Providers, SSH Servers, Environments, MCP Connections, and Execution History in workspace tabs.",
+        "settings.language": "Display language",
+        "nav.search_placeholder": "Search (Ctrl+K)",
     },
 }
 

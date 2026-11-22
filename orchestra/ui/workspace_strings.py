@@ -364,7 +364,21 @@ WORKSPACE_EN = {
     "서버 Worker에 등록된 저장소를 선택하세요.": "Select a repository registered on the Worker.",
     "이 PC": "This PC",
     "로컬 Worker": "Local Worker",
-    "삭제된 SSH 호스트": "Removed SSH host"
+    "삭제된 SSH 호스트": "Removed SSH host",
+    "다른 탭 닫기": "Close other tabs",
+    "관리 허브": "Administration hub",
+    "빠른 이동": "Quick jump",
+    "사이드바 접기 / 열기": "Toggle sidebar",
+    "패널 전환": "Toggle context panel",
+    "언어": "Language",
+    "한국어": "한국어",
+    "English": "English",
+    "Provider": "Provider",
+    "SSH": "SSH",
+    "MCP": "MCP",
+    "기록": "History",
+    "전체 화면": "Focus mode",
+    "설정 허브": "Settings hub"
 }
 
 

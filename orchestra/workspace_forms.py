@@ -17,6 +17,7 @@ from .ui import (
     Card,
     CollapsibleSection,
     EmptyState,
+    SettingsSection,
     StatusBadge,
     state_label,
     style_listbox_widget,
@@ -269,15 +270,19 @@ class ProjectSettings:
         top = tk.Frame(header.body, bg=p["panel"])
         top.pack(fill="x")
         StatusBadge(top, p, text=self.host_name(project.get("host")), tone="running" if project.get("host") else "success", ui_font=self.ui_font).pack(side="right", padx=(10, 0))
-        tk.Label(
+        proj_title = tk.Label(
             top, text=project["name"], bg=p["panel"], fg=p["text"],
             font=(self.ui_font, 12, "bold"), wraplength=480, justify="left", anchor="w",
-        ).pack(side="left", fill="x", expand=True)
-        tk.Label(
+        )
+        proj_title._theme_fg = "text"
+        proj_title.pack(side="left", fill="x", expand=True)
+        proj_meta = tk.Label(
             header.body,
             text=self.w("{0}   ·   브랜치 {1}   ·   원격 {2}", project['path'], project['branch'], project.get('origin') or '—'),
             bg=p["panel"], fg=p["muted"], font=(self.ui_font, 9), anchor="w",
-        ).pack(fill="x", pady=(4, 0))
+        )
+        proj_meta._theme_fg = "muted"
+        proj_meta.pack(fill="x", pady=(4, 0))
 
         panel_bar = ttk.Frame(panel)
         panel_bar.grid(row=1, column=0, sticky="ew", pady=(0, 8))
@@ -539,6 +544,9 @@ class ProjectSettings:
             bg=p["elevated"], fg=p["text_secondary"], justify="left", anchor="nw", padx=14, pady=12,
             font=(self.ui_font, 10), wraplength=660,
         )
+        self.wiz_project_preview._theme_bg = "elevated"
+        self.wiz_project_preview._theme_fg = "text_secondary"
+        self.track_themed(self.wiz_project_preview, bg_key="elevated", fg_key="text_secondary")
         self.wiz_project_preview.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 12))
 
         btns = tk.Frame(parent, bg=p["panel"])
@@ -551,7 +559,9 @@ class ProjectSettings:
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(2, weight=1)
         tk.Label(parent, text=self.w("2단계 · 목표를 자연어로 설명하고 실행 전략을 선택하세요"), bg=p["panel"], fg=p["text"], font=(self.ui_font, 13, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=(0, 8))
-        tk.Label(parent, text=self.w("예시: '로그인 모듈의 오류 원인을 분석하고 테스트를 추가해 주세요' 또는 'QA 명령만 실행하여 상태를 검증하세요'"), bg=p["panel"], fg=p["muted"], font=(self.ui_font, 9), anchor="w").grid(row=1, column=0, sticky="w", pady=(0, 6))
+        s2_hint = tk.Label(parent, text=self.w("예시: '로그인 모듈의 오류 원인을 분석하고 테스트를 추가해 주세요' 또는 'QA 명령만 실행하여 상태를 검증하세요'"), bg=p["panel"], fg=p["muted"], font=(self.ui_font, 9), anchor="w")
+        s2_hint._theme_fg = "muted"
+        s2_hint.grid(row=1, column=0, sticky="w", pady=(0, 6))
 
         self.wiz_intent = tk.Text(parent, wrap="word", height=6, padx=10, pady=8)
         style_text_widget(self.wiz_intent, p, self.ui_font, 10)
@@ -571,9 +581,11 @@ class ProjectSettings:
             c = Card(strat_row, p, padding=(12, 10), bg_key="elevated")
             c.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 8, 0))
             self._themed_cards.append(c)
-            rb = ttk.Radiobutton(c.body, text=name, variable=self.wiz_strategy_var, value=name)
+            rb = ttk.Radiobutton(c.body, text=name, variable=self.wiz_strategy_var, value=name, style="Card.TRadiobutton")
             rb.pack(anchor="w")
-            tk.Label(c.body, text=desc, bg=p["elevated"], fg=p["muted"], font=(self.ui_font, 9), wraplength=210, justify="left", anchor="w").pack(fill="x", pady=(6, 0))
+            desc_lbl = tk.Label(c.body, text=desc, bg=p["elevated"], fg=p["muted"], font=(self.ui_font, 9), wraplength=210, justify="left", anchor="w")
+            desc_lbl._theme_fg = "muted"
+            desc_lbl.pack(fill="x", pady=(6, 0))
 
     def _build_wizard_step3(self, parent):
         p = self.palette
@@ -601,6 +613,7 @@ class ProjectSettings:
         ttk.Checkbutton(parent, text=self.w("앱을 닫아도 Supervisor가 백그라운드에서 계속 실행"), variable=self.wiz_bg_var, style="Card.TCheckbutton").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 10))
 
         self.wiz_adv = CollapsibleSection(parent, self.w("고급 설정 (변경 허용 경로 · MCP 도구 · QA 명령)"), p, self.ui_font, expanded=False)
+        self._themed_cards.append(self.wiz_adv)
         self.wiz_adv.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         self.wiz_paths_var = tk.StringVar(self.window, "")
         self.wiz_tools_var = tk.StringVar(self.window, "")
@@ -620,6 +633,7 @@ class ProjectSettings:
         parent.rowconfigure(2, weight=1)
         tk.Label(parent, text=self.w("4단계 · 생성된 실행 계획 및 DAG 의존성 검토"), bg=p["panel"], fg=p["text"], font=(self.ui_font, 13, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=(0, 6))
         self.wiz_plan_summary = tk.Label(parent, text="", bg=p["panel"], fg=p["muted"], font=(self.ui_font, 9), anchor="w")
+        self.wiz_plan_summary._theme_fg = "muted"
         self.wiz_plan_summary.grid(row=1, column=0, sticky="w", pady=(0, 6))
         self.wiz_nodes_list = tk.Listbox(parent, height=7)
         style_listbox_widget(self.wiz_nodes_list, p, self.ui_font, 10)
@@ -649,7 +663,9 @@ class ProjectSettings:
             top.pack(fill="x")
             tk.Label(top, text=title, bg=p["elevated"], fg=p["text"], font=(self.ui_font, 10, "bold")).pack(side="left")
             StatusBadge(top, p, text=self.w("정책 적용"), tone=tone, ui_font=self.ui_font).pack(side="right")
-            tk.Label(c.body, text=desc, bg=p["elevated"], fg=p["text_secondary"], font=(self.ui_font, 9), anchor="w", wraplength=680, justify="left").pack(fill="x", pady=(4, 0))
+            d_lbl = tk.Label(c.body, text=desc, bg=p["elevated"], fg=p["text_secondary"], font=(self.ui_font, 9), anchor="w", wraplength=680, justify="left")
+            d_lbl._theme_fg = "text_secondary"
+            d_lbl.pack(fill="x", pady=(4, 0))
 
     def _build_wizard_step6(self, parent):
         p = self.palette
@@ -1119,14 +1135,17 @@ class ProjectSettings:
             c = Card(summary_row, self.palette, padding=(12, 9))
             c.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 8, 0))
             self._themed_cards.append(c)
-            tk.Label(c.body, text=title, bg=self.palette["panel"], fg=self.palette["muted"], font=(self.ui_font, 9, "bold"), anchor="w").pack(fill="x")
+            ttl = tk.Label(c.body, text=title, bg=self.palette["panel"], fg=self.palette["muted"], font=(self.ui_font, 9, "bold"), anchor="w")
+            ttl._theme_fg = "muted"
+            ttl.pack(fill="x")
             val = tk.Label(c.body, text="0", bg=self.palette["panel"], fg=self.palette["text"], font=(self.ui_font, 16, "bold"), anchor="w")
+            val._theme_fg = "text"
             val.pack(fill="x", pady=(2, 0))
             self.provider_summary_cards.append(val)
 
         self.provider_models_list = self.table(frame, 4, (
-            ("profile", self.w("모델 프로필"), 170), ("provider", "Provider", 105),
-            ("model", self.w("모델 ID"), 210), ("harnesses", "Harness", 140), ("roles", self.w("허용 역할"), 200),
+            ("profile", self.w("모델 프로필"), 140), ("provider", "Provider", 105),
+            ("model", self.w("모델 ID"), 175), ("harnesses", "Harness", 130), ("roles", self.w("허용 역할"), 100),
         ))
         return frame
 
@@ -1214,7 +1233,7 @@ class ProjectSettings:
 
     def settings_page(self):
         frame = self.base(t("settings.title", self.locale), t("settings.desc", self.locale))
-        frame.rowconfigure(4, weight=1)
+        frame.rowconfigure(5, weight=1)
         bar = ttk.Frame(frame)
         bar.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         self.button(bar, self.w("Provider 설정 마법사"), self.provider_wizard, True)
@@ -1233,15 +1252,34 @@ class ProjectSettings:
             pref_row, text="", bg=self.palette["panel"], fg=self.palette["text_secondary"],
             font=(self.ui_font, 9), anchor="w",
         )
+        self.settings_policy_label._theme_fg = "text_secondary"
         self.settings_policy_label.pack(side="left", fill="x", expand=True)
-        ttk.Button(pref_row, text=self.w("다크 / 라이트 전환"), style="Subtle.TButton", command=self.toggle_theme).pack(side="right", padx=(8, 0))
+        ttk.Button(pref_row, text=self.w("다크 / 라이트 전환"), style="Subtle.TButton", command=self.toggle_theme).pack(side="right", padx=(6, 0))
+        ttk.Button(pref_row, text="English", style="Compact.TButton", command=lambda: self.action(lambda: self.workspace_set_language("en"))).pack(side="right", padx=(4, 0))
+        ttk.Button(pref_row, text="한국어", style="Compact.TButton", command=lambda: self.action(lambda: self.workspace_set_language("ko"))).pack(side="right", padx=(4, 0))
         ttk.Button(pref_row, text=self.w("데이터 폴더 열기"), style="Subtle.TButton", command=lambda: self.action(lambda: open_directory(self.root))).pack(side="right")
 
-        self.settings_list = self.table(frame, 4, (
+        hub = SettingsSection(
+            frame, self.palette, t("settings.hub_title", self.locale), t("settings.hub_desc", self.locale),
+            ui_font=self.ui_font,
+        )
+        hub.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+        self._themed_cards.append(hub)
+        for label_text, route in (
+            (t("nav.providers", self.locale), "providers"),
+            (t("nav.ssh", self.locale), "ssh"),
+            (t("nav.hosts", self.locale), "hosts"),
+            (t("nav.mcp", self.locale), "mcp"),
+            (t("nav.history", self.locale), "history"),
+        ):
+            ttk.Button(hub.content, text=label_text, style="Compact.TButton", command=lambda r=route: self.show(r)).pack(side="left", padx=(0, 6))
+        ttk.Button(hub.content, text=self.w("읽기 전용 모니터 열기"), style="Compact.TButton", command=lambda: self.action(self.workspace_open_monitor)).pack(side="right")
+
+        self.settings_list = self.table(frame, 5, (
             ("profile", self.w("모델 프로필"), 170), ("provider", "Provider", 105),
             ("model", self.w("모델 ID"), 210), ("route", self.w("실행 경로"), 210),
         ))
-        ttk.Label(frame, text=self.w("설정·보고서·백업 위치   {0}", self.root), style="Muted.TLabel").grid(row=5, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(frame, text=self.w("설정·보고서·백업 위치   {0}", self.root), style="Muted.TLabel").grid(row=6, column=0, sticky="w", pady=(6, 0))
         return frame
 
     def refresh_settings(self):
