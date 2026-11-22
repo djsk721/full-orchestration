@@ -42,9 +42,22 @@
 | Session operation and cleanup | Mini accepted a new draft without submitting it. The pane and its inspected child processes exited. Test project files, CLI configuration, and Workspace model registry retained their contents. |
 | Final result | **PASS** for Linux model selection, authenticated OpenAI inference, and persisted response reception. |
 
+### Authorized Linux run on 2026-11-22
+
+| Evidence | Result | Observed value |
+| --- | --- | --- |
+| CLI and model selection | PASS | Linux Workspace on `feature/orca-workspace` at `43f214e` with local changes started native OpenCode 2.2.7 in `mini --standalone --model openai/gpt-5.6-luna` mode. Mini showed Luna and OpenAI. |
+| Working directory | PASS | `/tmp/orchestra-integrated-workspace-gqvgtd3r/second-project`, the existing isolated Git fixture. The OpenCode process and its persisted session both reported this directory. The fixture was mounted read-only and its tracked files retained their hashes. |
+| Authentication and routing | PASS | An isolated profile recognized the existing, unexpired OpenAI OAuth entry and exact catalog model. The native OpenAI provider resolved to `https://chatgpt.com/backend-api/codex/responses`. Direct TLS certificate and hostname verification passed. The provider accepted the Bearer-authenticated request with HTTP 200. |
+| One-request limit | PASS | The temporary test profile selected the native HTTP transport and installed request and retry hooks. A separate network-isolated run checked the same endpoint and vetoed a DNS-failure retry, with zero hosted requests. The live run recorded **1** hosted request, **0** retries and **0** tool invocations. The guard blocked automatic title generation and limited the outbound body to the specified prompt and a generic instruction. |
+| Response reception | PASS | `Reply with exactly: ORCHESTRATION_GPT_TEST_OK` returned `ORCHESTRATION_GPT_TEST_OK`. The OpenCode transcript recorded provider `openai`, model `gpt-5.6-luna`, and session outcome `succeeded`. |
+| Duration and usage | PASS | 2.619 s from prompt submission to completed session and 1.126 s from HTTP dispatch to response headers. OpenCode recorded 27 input tokens, 12 output tokens, and zero reasoning, cache-read and cache-write tokens. |
+| Session operation and cleanup | PASS | Mini accepted an unsubmitted draft after the response. The Workspace pane and its inspected child processes closed. The existing CLI and model configuration remained intact. |
+| Final result | **PASS** | Linux model selection, authenticated hosted inference, and exact response reception each verified under this authorization. |
+
 ## Current Agent and Windows compatibility
 
-The new Agent pipeline ran on Linux with the installed OpenCode CLI and a deterministic loopback API. It used an explicit model across a real Supervisor DAG and captured OpenCode JSON output, HTTP 401 handling, cancellation, and a role-specific planning handoff. That check made zero hosted requests. The separately authorized interactive GPT result above remains the only hosted run. [Agent E2E evidence](multi-agent-orchestration-e2e.md)
+The new Agent pipeline ran on Linux with the installed OpenCode CLI and a deterministic loopback API. It used an explicit model across a real Supervisor DAG and captured OpenCode JSON output, HTTP 401 handling, cancellation, and a role-specific planning handoff. That check made zero hosted requests. The individually authorized interactive runs above provide the hosted inference evidence. [Agent E2E evidence](multi-agent-orchestration-e2e.md)
 
 | Windows item on the current working tree | Status | Procedure and expected evidence |
 | --- | --- | --- |
