@@ -13,7 +13,7 @@ from .desktop import formatted
 from .execution_state import TERMINAL
 from .observability import EVENT_LABELS, agent_rows
 from .remote import MAX_FILE, metrics
-from .ssh import PROTOCOL, SSHClient, pinned_key, scan_keys, trust_key, validate_profile, worker_compatibility
+from .ssh import PROTOCOL, SSHClient, known_host_keys, pinned_key, scan_keys, trust_key, validate_profile, worker_compatibility
 from .ssh_config import local_ssh_hosts
 from .ui import state_label, t
 from .workspace import put_host, put_project, read_workspace, remove_profile
@@ -292,29 +292,43 @@ class RemoteWorkspace:
         self.render_host()
 
         def scan():
+            stored, revoked = known_host_keys(profile)
+            if stored and not pinned_key(self.root, key, profile):
+                return stored, True, None
             try:
-                return scan_keys(profile), None
+                candidates = {mark: value for mark, value in scan_keys(profile).items() if mark not in revoked}
+                require(candidates, self.w("사용자 SSH 신뢰 기록에서 폐기된 키가 발견되었습니다. 서버 관리자에게 확인하세요."))
+                return candidates, False, None
             except (ValueError, OSError, RuntimeError) as error:
-                return {}, error
+                return {}, False, error
 
         def profile_is_current():
             current = self.edit_host_profile(key)
             return current is not None and validate_profile(current) == profile
 
         def confirm(result):
-            candidates, error = result
-            if error:
-                raise error
+            candidates, from_known_hosts, error = result
             if not profile_is_current():
+                return False
+            target = f'{profile["name"]} · {profile["user"]}@{profile["host"]}:{profile["port"]}'
+            if error:
+                messagebox.showerror(self.w("SSH 호스트 지문 확인"), self.w(
+                    "{0}\n\n공개 호스트 키 조회가 실패했습니다.\n{1}\n\n같은 PC에서 SSH 접속에 사용하는 주소, 포트와 경유 설정을 확인하세요.",
+                    target, self.workspace_error(error)), parent=self.window)
                 return False
             before = pinned_key(self.root, key, profile)
             details = "\n".join(f"{fingerprint}   {data[0]}" for fingerprint, data in candidates.items())
             previous = self.w("\n기존에 신뢰한 지문  {0}", before[1]) if before else ""
+            if from_known_hosts:
+                prompt = self.w("{0}\n\n사용자 ~/.ssh/known_hosts에 저장된 지문\n{1}\n\n이 서버에 대해 기존에 확인한 지문이면 확인을 누르세요.",
+                                target, details)
+                initial = next(iter(candidates))
+            else:
+                prompt = self.w("{0}{1}\n\n서버가 공개한 후보\n{2}\n\n서버 관리자 등 독립 경로로 확인한 지문을 입력하세요.",
+                                target, previous, details)
+                initial = ""
             value = simpledialog.askstring(
-                self.w("SSH 호스트 지문 확인"),
-                self.w("{0}{1}\n\n서버가 공개한 후보\n{2}\n\n서버 관리자 등 독립 경로로 확인한 지문을 입력하세요.",
-                       f'{profile["name"]} · {profile["user"]}@{profile["host"]}:{profile["port"]}', previous, details),
-                parent=self.window,
+                self.w("SSH 호스트 지문 확인"), prompt, initialvalue=initial, parent=self.window,
             )
             if not value or not profile_is_current():
                 return False

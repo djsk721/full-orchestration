@@ -93,6 +93,44 @@ def fingerprint(blob):
     return "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode(blob, validate=True)).digest()).decode().rstrip("=")
 
 
+_HOST_KEY_TYPES = {"ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa"}
+
+
+def _key_line(fields):
+    if len(fields) < 3 or fields[1] not in _HOST_KEY_TYPES:
+        return None
+    try:
+        return fingerprint(fields[2]), (fields[1], fields[2])
+    except ValueError:
+        return None
+
+
+def known_host_keys(profile, path=None):
+    """Read direct host keys and revocations for the exact address and port."""
+    address = host_label(validate_profile(profile))
+    keys, revoked = {}, set()
+    try:
+        path = Path.home() / ".ssh" / "known_hosts" if path is None else Path(path)
+        if not path.is_file():
+            return keys, revoked
+        code, raw = run(["ssh-keygen", "-F", address, "-f", str(path)], env=ssh_env(), timeout=5, limit=40000)
+    except (ValueError, OSError, RuntimeError):
+        return keys, revoked
+    if code:
+        return keys, revoked
+    for line in raw.decode("ascii", errors="replace").splitlines():
+        fields = line.split()
+        if not fields or fields[0].startswith("#"):
+            continue
+        if fields[0] == "@revoked":
+            if record := _key_line(fields[1:]):
+                revoked.add(record[0])
+        elif fields[0].startswith("|1|") or address.casefold() in fields[0].casefold().split(","):
+            if record := _key_line(fields):
+                keys[record[0]] = record[1]
+    return {mark: key for mark, key in keys.items() if mark not in revoked}, revoked
+
+
 def scan_keys(profile):
     profile = validate_profile(profile)
     code, raw = run(["ssh-keyscan", "-T", str(profile["timeout"]), "-p", str(profile["port"]),
@@ -100,15 +138,8 @@ def scan_keys(profile):
                     limit=40000)
     keys = {}
     for line in raw.decode("ascii", errors="replace").splitlines():
-        fields = line.split()
-        if len(fields) != 3 or fields[1] not in ("ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384",
-                                                  "ecdsa-sha2-nistp521", "ssh-rsa"):
-            continue
-        try:
-            mark = fingerprint(fields[2])
-        except ValueError:
-            continue
-        keys[mark] = (fields[1], fields[2])
+        if record := _key_line(line.split()):
+            keys[record[0]] = record[1]
     require(not code or keys, "SSH 호스트 키를 읽을 수 없습니다.")
     require(keys, "SSH 서버가 공개 호스트 키를 반환하지 않았습니다.")
     return keys

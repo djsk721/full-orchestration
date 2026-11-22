@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orchestra.platform.command_line import format_commands
 from orchestra.remote import register_project
-from orchestra.ssh import fingerprint, pin_path
+from orchestra.ssh import fingerprint, host_label, known_host_keys, pin_path
 from orchestra.store import Store
 from orchestra.workspace import STRATEGIES, inspect_project, put_host, put_project, save_registry
 from orchestra.workspace_desktop import WorkspaceDesktop
@@ -590,6 +590,23 @@ def exercise(args, window, app, store, root, repository, first_id, second_id, se
                 wait(window, lambda: app.ssh_list.set(host, "status") == "Worker 연결 성공",
                      "connection test did not resume after fingerprint confirmation")
                 assert expected in fingerprint_dialog.call_args.args[1] and pin.is_file()
+
+            pin.unlink()
+            profile = app.ssh(host).profile
+            local_known_hosts = root / "ssh-fixture" / "existing_known_hosts"
+            algorithm, public_key, *_ = (local_known_hosts.parent / "host.pub").read_text().split()
+            endpoint = host_label(profile)
+            local_known_hosts.write_text(f"{endpoint} {algorithm} {public_key}\n", encoding="ascii")
+            original = local_known_hosts.read_bytes()
+            with patch("orchestra.workspace_remote.known_host_keys", side_effect=lambda profile: known_host_keys(profile, local_known_hosts)), \
+                    patch("orchestra.workspace_remote.scan_keys") as scan, \
+                    patch("orchestra.workspace_remote.simpledialog.askstring", return_value=expected) as fingerprint_dialog:
+                press(app.pages["ssh"], "연결 테스트")
+                wait(window, lambda: app.ssh_list.set(host, "status") == "Worker 연결 성공",
+                     "connection test did not reuse the local trusted key")
+                assert fingerprint_dialog.call_args.kwargs["initialvalue"] == expected and pin.is_file()
+                scan.assert_not_called()
+            assert local_known_hosts.read_bytes() == original
 
             remote_tab = app.open_ssh_terminal(host)
             assert app.terminal_tabs[remote_tab].recipes[0].project is None, "unrelated local project was assigned to SSH"

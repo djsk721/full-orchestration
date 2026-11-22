@@ -15,7 +15,7 @@ from unittest.mock import patch
 from orchestra.core import Invalid, defaults, path_in
 from orchestra.observability import agent_rows
 from orchestra.remote import PROTOCOL, dispatch, register_project
-from orchestra.ssh import SSHClient, fingerprint, pinned_key, ssh_arguments, trust_key, validate_profile
+from orchestra.ssh import SSHClient, fingerprint, known_host_keys, pinned_key, ssh_arguments, trust_key, validate_profile
 from orchestra.store import Store
 from orchestra.terminal import Pty
 from orchestra.workspace import STRATEGIES, add_setup_profile, draft_plan, inspect_project, plan_routes, put_project, save_registry, scan_clis
@@ -29,6 +29,26 @@ def init_repo(path):
     subprocess.run(["git", "-C", str(path), "add", "checked.txt"], check=True)
     subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture",
                     "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], check=True)
+
+
+class KnownHostsTest(unittest.TestCase):
+    def test_lookup_preserves_port_and_excludes_revoked_and_certificate_keys(self):
+        profile = {"name": "Fixture", "host": "example.test", "port": 2222, "user": "operator"}
+        endpoint = "[example.test]:2222"
+        valid, revoked, authority = (base64.b64encode(value).decode() for value in (b"valid", b"revoked", b"ca"))
+        output = (f"{endpoint} ssh-ed25519 {valid}\n"
+                  f"{endpoint} ssh-ed25519 {revoked}\n"
+                  f"@revoked {endpoint} ssh-ed25519 {revoked}\n"
+                  f"@cert-authority {endpoint} ssh-ed25519 {authority}\n"
+                  f"example.test ssh-ed25519 {authority}\n").encode()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known_hosts"
+            path.touch()
+            with patch("orchestra.ssh.run", return_value=(0, output)) as lookup:
+                keys, denied = known_host_keys(profile, path)
+            self.assertEqual(lookup.call_args.args[0], ["ssh-keygen", "-F", endpoint, "-f", str(path)])
+        self.assertEqual(keys, {fingerprint(valid): ("ssh-ed25519", valid)})
+        self.assertEqual(denied, {fingerprint(revoked)})
 
 
 class CliDiscoveryTest(unittest.TestCase):
