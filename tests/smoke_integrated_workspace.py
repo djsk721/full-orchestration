@@ -407,11 +407,13 @@ def exercise(args, window, app, store, root, repository, first_id, second_id, se
     verify_split_input_during_output(window, app, repository)
     app.select_workspace_project(first_id)
     assert app.project_id == first_id
-    screen(window, args.screenshots, "integrated-workspace-1440x900.png", (1440, 900))
-    app.toggle_theme()
     assert app.theme_name == "light"
     screen(window, args.screenshots, "integrated-workspace-light-1920x1080.png", (1920, 1080))
     app.toggle_theme()
+    assert app.theme_name == "dark"
+    screen(window, args.screenshots, "integrated-workspace-1440x900.png", (1440, 900))
+    app.toggle_theme()
+    assert app.theme_name == "light"
     screen(window, None, "", (1440, 900))
     app.workspace_search.set("second project")
     items = [app.workspace_tree.item(key, "text").casefold() for key in tree_items(app.workspace_tree)]

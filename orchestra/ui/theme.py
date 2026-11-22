@@ -1,10 +1,35 @@
-"""Design tokens, dark/light ttk themes, and authoritative status mappings."""
+"""Design tokens, light/dark ttk themes, typography, and authoritative status mappings."""
 from __future__ import annotations
 
+import sys
 from tkinter import font as tkfont
 from tkinter import ttk
 
 from ..execution_state import merge_candidate_ready
+
+SPACING = {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+}
+
+DIMENSIONS = {
+    "sidebar_width": 236,
+    "header_height": 48,
+    "row_height": 28,
+    "sidebar_row_height": 26,
+    "status_height": 44,
+}
+
+TYPE_SCALE = {
+    "heading": 14,
+    "section": 11,
+    "body": 10,
+    "small": 9,
+    "micro": 8,
+}
 
 THEMES = {
     "dark": {
@@ -35,6 +60,12 @@ THEMES = {
         "tree_selected": "#1f3a60",
         "graph_bg": "#111827",
         "graph_edge": "#546b8c",
+        "status_bar": "#0f1520",
+        "status_border": "#1e293b",
+        "tab_bg": "#161d2b",
+        "tab_active_bg": "#0d1117",
+        "input_bg": "#1e293b",
+        "separator": "#2a364b",
         "badges": {
             "success": ("#123225", "#5eead4", "#1d5b42"),
             "running": ("#142a4b", "#7cc4ff", "#255290"),
@@ -57,38 +88,44 @@ THEMES = {
     },
     "light": {
         "name": "light",
-        "canvas": "#f4f6fa",
-        "sidebar": "#eaeff6",
-        "sidebar_border": "#d0dae6",
-        "header": "#ffffff",
+        "canvas": "#ffffff",
+        "sidebar": "#f6f7f9",
+        "sidebar_border": "#e5e7eb",
+        "header": "#fafafa",
         "panel": "#ffffff",
-        "elevated": "#f1f5f9",
-        "hover": "#e2e8f0",
-        "active": "#dbeafe",
-        "border": "#cbd5e1",
-        "border_strong": "#94a3b8",
-        "text": "#0f172a",
-        "text_secondary": "#334155",
-        "muted": "#52657c",
+        "elevated": "#f3f4f6",
+        "hover": "#eaecf0",
+        "active": "#e8f0fe",
+        "border": "#e5e7eb",
+        "border_strong": "#cbd5e1",
+        "text": "#111827",
+        "text_secondary": "#374151",
+        "muted": "#6b7280",
         "accent": "#2563eb",
         "accent_hover": "#1d4ed8",
         "accent_text": "#ffffff",
         "danger": "#dc2626",
         "danger_hover": "#b91c1c",
-        "nav_fg": "#1e293b",
-        "nav_muted": "#64748b",
-        "nav_active_fg": "#1d4ed8",
-        "terminal_bg": "#0f1724",
+        "nav_fg": "#374151",
+        "nav_muted": "#6b7280",
+        "nav_active_fg": "#111827",
+        "terminal_bg": "#111827",
         "terminal_fg": "#e5edf7",
-        "tree_selected": "#dbeafe",
+        "tree_selected": "#e8f0fe",
         "graph_bg": "#ffffff",
         "graph_edge": "#64748b",
+        "status_bar": "#fafafa",
+        "status_border": "#e5e7eb",
+        "tab_bg": "#f3f4f6",
+        "tab_active_bg": "#ffffff",
+        "input_bg": "#ffffff",
+        "separator": "#e5e7eb",
         "badges": {
             "success": ("#dcfce7", "#166534", "#86efac"),
             "running": ("#dbeafe", "#1e40af", "#93c5fd"),
             "warning": ("#fef3c7", "#92400e", "#fcd34d"),
             "danger": ("#fee2e2", "#991b1b", "#fca5a5"),
-            "neutral": ("#e2e8f0", "#334155", "#cbd5e1"),
+            "neutral": ("#f3f4f6", "#374151", "#e5e7eb"),
         },
         "graph_nodes": {
             "SUCCEEDED": ("#e6f6ed", "#4ca97b", "#14532d"),
@@ -109,17 +146,60 @@ THEMES = {
 def resolve_fonts(window):
     """Pick the sharpest cross-platform UI and monospace font families available."""
     names = {family.casefold(): family for family in tkfont.families(window)}
-    ui_candidates = (
-        "Segoe UI", "Malgun Gothic", "Noto Sans CJK KR", "NanumBarunGothic",
-        "NanumGothic", "Ubuntu", "DejaVu Sans", "gothic",
-    )
-    mono_candidates = (
-        "Cascadia Mono", "Consolas", "NanumGothicCoding",
-        "DejaVu Sans Mono", "courier 10 pitch", "fixed",
-    )
+    if sys.platform == "win32":
+        ui_candidates = (
+            "Segoe UI", "Malgun Gothic", "Noto Sans CJK KR",
+            "NanumBarunGothic", "DejaVu Sans", "Arial",
+        )
+        mono_candidates = (
+            "Cascadia Mono", "Consolas", "D2Coding",
+            "NanumGothicCoding", "DejaVu Sans Mono", "Courier New",
+        )
+    else:
+        ui_candidates = (
+            "Noto Sans CJK KR", "NanumBarunGothic", "NanumGothic",
+            "Ubuntu", "DejaVu Sans", "Liberation Sans",
+            "SF Pro Text", "Helvetica Neue", "gothic",
+        )
+        mono_candidates = (
+            "Cascadia Mono", "NanumGothicCoding", "JetBrains Mono",
+            "DejaVu Sans Mono", "Inconsolata", "Liberation Mono",
+            "Consolas", "courier 10 pitch", "fixed",
+        )
     ui_font = next((names[item.casefold()] for item in ui_candidates if item.casefold() in names), "TkDefaultFont")
     mono_font = next((names[item.casefold()] for item in mono_candidates if item.casefold() in names), "TkFixedFont")
+    if ui_font == "TkDefaultFont":
+        try:
+            ui_font = tkfont.nametofont("TkDefaultFont", root=window).actual().get("family") or "TkDefaultFont"
+        except Exception:
+            pass
+    if mono_font == "TkFixedFont":
+        try:
+            mono_font = tkfont.nametofont("TkFixedFont", root=window).actual().get("family") or "TkFixedFont"
+        except Exception:
+            pass
     return ui_font, mono_font
+
+
+def _apply_named_fonts(window, ui_font: str, mono_font: str) -> None:
+    """Keep Tk named fonts aligned so menus, dialogs, and popups match the theme scale."""
+    specs = (
+        ("TkDefaultFont", ui_font, TYPE_SCALE["body"], "normal"),
+        ("TkTextFont", ui_font, TYPE_SCALE["body"], "normal"),
+        ("TkMenuFont", ui_font, TYPE_SCALE["small"], "normal"),
+        ("TkHeadingFont", ui_font, TYPE_SCALE["small"], "bold"),
+        ("TkCaptionFont", ui_font, TYPE_SCALE["small"], "normal"),
+        ("TkFixedFont", mono_font, TYPE_SCALE["body"], "normal"),
+    )
+    for name, family, size, weight in specs:
+        try:
+            font = tkfont.nametofont(name, root=window)
+            if family not in ("TkDefaultFont", "TkFixedFont"):
+                font.configure(family=family, size=size, weight=weight)
+            else:
+                font.configure(size=size, weight=weight)
+        except Exception:
+            continue
 
 
 def status_tone(state: str | None) -> str:
@@ -182,48 +262,64 @@ def approval_state_info(job: dict | None, tasks: dict | None = None, events: lis
 
 def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> dict:
     """Configure ttk widget styles cleanly for the requested palette."""
-    palette = THEMES.get(theme_name, THEMES["dark"])
+    palette = THEMES.get(theme_name, THEMES["light"])
     style = ttk.Style()
     style.theme_use("clam")
 
+    _apply_named_fonts(window, ui_font, mono_font)
     window.configure(bg=palette["canvas"])
-    window.option_add("*Font", (ui_font, 10))
+    window.option_add("*Font", (ui_font, TYPE_SCALE["body"]))
+    window.option_add("*Menu.background", palette["panel"])
+    window.option_add("*Menu.foreground", palette["text"])
+    window.option_add("*Menu.activeBackground", palette["active"])
+    window.option_add("*Menu.activeForeground", palette["text"])
+    window.option_add("*TCombobox*Listbox.background", palette["panel"])
+    window.option_add("*TCombobox*Listbox.foreground", palette["text"])
+    window.option_add("*TCombobox*Listbox.selectBackground", palette["active"])
+    window.option_add("*TCombobox*Listbox.selectForeground", palette["text"])
 
-    style.configure(".", font=(ui_font, 10), background=palette["canvas"], foreground=palette["text"])
+    style.configure(".", font=(ui_font, TYPE_SCALE["body"]), background=palette["canvas"], foreground=palette["text"])
     style.configure("TFrame", background=palette["canvas"])
     style.configure("Header.TFrame", background=palette["header"])
     style.configure("Sidebar.TFrame", background=palette["sidebar"])
+    style.configure("StatusBar.TFrame", background=palette["status_bar"])
     style.configure("Card.TFrame", background=palette["panel"], bordercolor=palette["border"], relief="flat")
     style.configure("Elevated.TFrame", background=palette["elevated"], bordercolor=palette["border"], relief="flat")
+    style.configure("TSeparator", background=palette["separator"])
 
     style.configure("TLabel", background=palette["canvas"], foreground=palette["text"])
-    style.configure("Muted.TLabel", background=palette["canvas"], foreground=palette["muted"], font=(ui_font, 9))
+    style.configure("Muted.TLabel", background=palette["canvas"], foreground=palette["muted"], font=(ui_font, TYPE_SCALE["small"]))
     style.configure("Secondary.TLabel", background=palette["canvas"], foreground=palette["text_secondary"])
-    style.configure("Heading.TLabel", background=palette["canvas"], foreground=palette["text"], font=(ui_font, 19, "bold"))
-    style.configure("Subheading.TLabel", background=palette["canvas"], foreground=palette["muted"], font=(ui_font, 10))
-    style.configure("Section.TLabel", background=palette["canvas"], foreground=palette["text"], font=(ui_font, 12, "bold"))
+    style.configure("Heading.TLabel", background=palette["canvas"], foreground=palette["text"], font=(ui_font, TYPE_SCALE["heading"], "bold"))
+    style.configure("PageHeading.TLabel", background=palette["canvas"], foreground=palette["text"], font=(ui_font, TYPE_SCALE["heading"], "bold"))
+    style.configure("Subheading.TLabel", background=palette["canvas"], foreground=palette["muted"], font=(ui_font, TYPE_SCALE["small"]))
+    style.configure("Section.TLabel", background=palette["canvas"], foreground=palette["text"], font=(ui_font, TYPE_SCALE["section"], "bold"))
 
-    style.configure("Header.TLabel", background=palette["header"], foreground=palette["text"], font=(ui_font, 10, "bold"))
-    style.configure("HeaderMuted.TLabel", background=palette["header"], foreground=palette["muted"], font=(ui_font, 9))
+    style.configure("Header.TLabel", background=palette["header"], foreground=palette["text"], font=(ui_font, TYPE_SCALE["small"], "bold"))
+    style.configure("HeaderMuted.TLabel", background=palette["header"], foreground=palette["muted"], font=(ui_font, TYPE_SCALE["small"]))
+    style.configure("Sidebar.TLabel", background=palette["sidebar"], foreground=palette["nav_fg"], font=(ui_font, TYPE_SCALE["small"]))
+    style.configure("SidebarMuted.TLabel", background=palette["sidebar"], foreground=palette["nav_muted"], font=(ui_font, TYPE_SCALE["micro"]))
+    style.configure("SidebarSection.TLabel", background=palette["sidebar"], foreground=palette["nav_muted"], font=(ui_font, TYPE_SCALE["micro"], "bold"))
+    style.configure("StatusBar.TLabel", background=palette["status_bar"], foreground=palette["muted"], font=(ui_font, TYPE_SCALE["small"]))
 
-    style.configure("Card.TLabel", background=palette["panel"], foreground=palette["muted"], font=(ui_font, 9))
-    style.configure("CardBody.TLabel", background=palette["panel"], foreground=palette["text_secondary"], font=(ui_font, 10))
-    style.configure("CardTitle.TLabel", background=palette["panel"], foreground=palette["text"], font=(ui_font, 11, "bold"))
-    style.configure("CardMono.TLabel", background=palette["panel"], foreground=palette["text_secondary"], font=(mono_font, 9))
-    style.configure("Metric.TLabel", background=palette["panel"], foreground=palette["text"], font=(ui_font, 20, "bold"))
-    style.configure("Elevated.TLabel", background=palette["elevated"], foreground=palette["text_secondary"], font=(ui_font, 9))
-    style.configure("ElevatedTitle.TLabel", background=palette["elevated"], foreground=palette["text"], font=(ui_font, 10, "bold"))
+    style.configure("Card.TLabel", background=palette["panel"], foreground=palette["muted"], font=(ui_font, TYPE_SCALE["small"]))
+    style.configure("CardBody.TLabel", background=palette["panel"], foreground=palette["text_secondary"], font=(ui_font, TYPE_SCALE["body"]))
+    style.configure("CardTitle.TLabel", background=palette["panel"], foreground=palette["text"], font=(ui_font, TYPE_SCALE["section"], "bold"))
+    style.configure("CardMono.TLabel", background=palette["panel"], foreground=palette["text_secondary"], font=(mono_font, TYPE_SCALE["small"]))
+    style.configure("Metric.TLabel", background=palette["panel"], foreground=palette["text"], font=(ui_font, 18, "bold"))
+    style.configure("Elevated.TLabel", background=palette["elevated"], foreground=palette["text_secondary"], font=(ui_font, TYPE_SCALE["small"]))
+    style.configure("ElevatedTitle.TLabel", background=palette["elevated"], foreground=palette["text"], font=(ui_font, TYPE_SCALE["body"], "bold"))
 
     style.configure(
         "TButton",
-        padding=(12, 6),
+        padding=(10, 4),
         background=palette["elevated"],
         foreground=palette["text"],
         bordercolor=palette["border"],
         lightcolor=palette["elevated"],
         darkcolor=palette["elevated"],
         relief="flat",
-        font=(ui_font, 9, "bold"),
+        font=(ui_font, TYPE_SCALE["small"], "bold"),
     )
     style.map(
         "TButton",
@@ -234,14 +330,14 @@ def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> di
 
     style.configure(
         "Primary.TButton",
-        padding=(13, 6),
+        padding=(11, 4),
         background=palette["accent"],
         foreground=palette["accent_text"],
         bordercolor=palette["accent"],
         lightcolor=palette["accent"],
         darkcolor=palette["accent"],
         relief="flat",
-        font=(ui_font, 9, "bold"),
+        font=(ui_font, TYPE_SCALE["small"], "bold"),
     )
     style.map(
         "Primary.TButton",
@@ -252,12 +348,12 @@ def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> di
 
     style.configure(
         "Danger.TButton",
-        padding=(12, 6),
+        padding=(10, 4),
         background=palette["danger"],
         foreground="#ffffff",
         bordercolor=palette["danger"],
         relief="flat",
-        font=(ui_font, 9, "bold"),
+        font=(ui_font, TYPE_SCALE["small"], "bold"),
     )
     style.map(
         "Danger.TButton",
@@ -268,12 +364,12 @@ def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> di
 
     style.configure(
         "Subtle.TButton",
-        padding=(9, 5),
+        padding=(8, 4),
         background=palette["panel"],
         foreground=palette["text_secondary"],
         bordercolor=palette["border"],
         relief="flat",
-        font=(ui_font, 9),
+        font=(ui_font, TYPE_SCALE["small"]),
     )
     style.map(
         "Subtle.TButton",
@@ -281,18 +377,48 @@ def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> di
         foreground=[("disabled", palette["muted"]), ("active", palette["text"])],
     )
 
+    style.configure(
+        "Compact.TButton",
+        padding=(7, 3),
+        background=palette["panel"],
+        foreground=palette["text_secondary"],
+        bordercolor=palette["border"],
+        relief="flat",
+        font=(ui_font, TYPE_SCALE["small"]),
+    )
+    style.map(
+        "Compact.TButton",
+        background=[("disabled", palette["panel"]), ("active", palette["hover"])],
+        foreground=[("disabled", palette["muted"]), ("active", palette["text"])],
+    )
+
+    style.configure(
+        "Icon.TButton",
+        padding=(5, 3),
+        background=palette["header"],
+        foreground=palette["text_secondary"],
+        bordercolor=palette["border"],
+        relief="flat",
+        font=(ui_font, TYPE_SCALE["small"], "bold"),
+    )
+    style.map(
+        "Icon.TButton",
+        background=[("active", palette["hover"]), ("pressed", palette["active"])],
+        foreground=[("active", palette["text"])],
+    )
+
     for tone, (bg, fg, _border) in palette["badges"].items():
         style.configure(
             f"Badge.{tone.capitalize()}.TLabel",
             background=bg,
             foreground=fg,
-            padding=(8, 3),
-            font=(ui_font, 9, "bold"),
+            padding=(7, 2),
+            font=(ui_font, TYPE_SCALE["small"], "bold"),
         )
 
     style.configure(
         "Treeview",
-        rowheight=32,
+        rowheight=DIMENSIONS["row_height"],
         background=palette["panel"],
         fieldbackground=palette["panel"],
         foreground=palette["text"],
@@ -300,15 +426,16 @@ def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> di
         lightcolor=palette["panel"],
         darkcolor=palette["panel"],
         relief="flat",
+        font=(ui_font, TYPE_SCALE["small"]),
     )
     style.configure(
         "Treeview.Heading",
-        padding=(8, 7),
+        padding=(8, 6),
         background=palette["elevated"],
         foreground=palette["text_secondary"],
         bordercolor=palette["border"],
         relief="flat",
-        font=(ui_font, 9, "bold"),
+        font=(ui_font, TYPE_SCALE["small"], "bold"),
     )
     style.map("Treeview.Heading", background=[("active", palette["hover"])])
     style.map(
@@ -317,47 +444,80 @@ def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> di
         foreground=[("selected", palette["text"])],
     )
 
+    style.configure(
+        "Sidebar.Treeview",
+        rowheight=DIMENSIONS["sidebar_row_height"],
+        background=palette["sidebar"],
+        fieldbackground=palette["sidebar"],
+        foreground=palette["nav_fg"],
+        bordercolor=palette["sidebar"],
+        lightcolor=palette["sidebar"],
+        darkcolor=palette["sidebar"],
+        relief="flat",
+        font=(ui_font, TYPE_SCALE["small"]),
+    )
+    style.map(
+        "Sidebar.Treeview",
+        background=[("selected", palette["active"])],
+        foreground=[("selected", palette["nav_active_fg"])],
+    )
+
     style.configure("TNotebook", background=palette["canvas"], bordercolor=palette["border"], tabmargins=(0, 2, 0, 0))
     style.configure(
         "TNotebook.Tab",
-        padding=(12, 6),
-        background=palette["elevated"],
+        padding=(10, 5),
+        background=palette["tab_bg"],
         foreground=palette["muted"],
         bordercolor=palette["border"],
-        font=(ui_font, 9, "bold"),
+        font=(ui_font, TYPE_SCALE["small"], "bold"),
     )
     style.map(
         "TNotebook.Tab",
-        background=[("selected", palette["panel"]), ("active", palette["hover"])],
+        background=[("selected", palette["tab_active_bg"]), ("active", palette["hover"])],
+        foreground=[("selected", palette["text"]), ("active", palette["text_secondary"])],
+    )
+
+    style.configure("Workspace.TNotebook", background=palette["header"], bordercolor=palette["border"], tabmargins=(4, 4, 4, 0))
+    style.configure(
+        "Workspace.TNotebook.Tab",
+        padding=(11, 5),
+        background=palette["tab_bg"],
+        foreground=palette["muted"],
+        bordercolor=palette["border"],
+        font=(ui_font, TYPE_SCALE["small"], "bold"),
+    )
+    style.map(
+        "Workspace.TNotebook.Tab",
+        background=[("selected", palette["tab_active_bg"]), ("active", palette["hover"])],
         foreground=[("selected", palette["text"]), ("active", palette["text_secondary"])],
     )
 
     style.configure(
         "TEntry",
-        fieldbackground=palette["elevated"],
+        fieldbackground=palette["input_bg"],
         foreground=palette["text"],
         insertcolor=palette["text"],
         bordercolor=palette["border"],
         lightcolor=palette["border"],
         darkcolor=palette["border"],
-        padding=(8, 5),
+        padding=(7, 4),
     )
     style.map("TEntry", bordercolor=[("focus", palette["accent"])])
 
     style.configure(
         "TCombobox",
-        fieldbackground=palette["elevated"],
+        fieldbackground=palette["input_bg"],
         background=palette["elevated"],
         foreground=palette["text"],
         arrowcolor=palette["text_secondary"],
         bordercolor=palette["border"],
-        padding=(6, 4),
+        padding=(6, 3),
     )
     style.map(
         "TCombobox",
-        fieldbackground=[("readonly", palette["elevated"])],
+        fieldbackground=[("readonly", palette["input_bg"])],
         foreground=[("readonly", palette["text"])],
-        selectbackground=[("readonly", palette["elevated"])],
+        selectbackground=[("readonly", palette["input_bg"])],
         selectforeground=[("readonly", palette["text"])],
         bordercolor=[("focus", palette["accent"])],
     )
@@ -366,6 +526,10 @@ def apply_ttk_theme(window, theme_name: str, ui_font: str, mono_font: str) -> di
     style.map("TCheckbutton", background=[("active", palette["canvas"])])
     style.configure("Card.TCheckbutton", background=palette["panel"], foreground=palette["text"])
     style.map("Card.TCheckbutton", background=[("active", palette["panel"])])
+    style.configure("TRadiobutton", background=palette["canvas"], foreground=palette["text"])
+    style.map("TRadiobutton", background=[("active", palette["canvas"])])
+    style.configure("Card.TRadiobutton", background=palette["elevated"], foreground=palette["text"])
+    style.map("Card.TRadiobutton", background=[("active", palette["elevated"])])
 
     style.configure("TPanedwindow", background=palette["border"])
     style.configure("Sash", sashthickness=5, gripcount=0)

@@ -5,8 +5,9 @@ import unittest
 
 from orchestra.desktop import STATES
 from orchestra.execution_state import INCOMPLETE, LIVE, TERMINAL
-from orchestra.ui.strings import LOCALES, NAV_GROUPS, STATES_I18N, STRINGS, state_label, t
-from orchestra.ui.theme import THEMES, approval_state_info, status_tone
+from orchestra.ui.strings import LOCALES, NAV_GROUPS, PRIMARY_NAV, STATES_I18N, STRINGS, state_label, t
+from orchestra.ui.theme import DIMENSIONS, SPACING, THEMES, TYPE_SCALE, approval_state_info, status_tone
+from orchestra.workspace_shell import ROUTE_SPECS
 
 
 class UIContractsTest(unittest.TestCase):
@@ -17,11 +18,16 @@ class UIContractsTest(unittest.TestCase):
             "accent", "accent_hover", "accent_text", "danger", "danger_hover",
             "nav_fg", "nav_muted", "nav_active_fg", "terminal_bg", "terminal_fg",
             "tree_selected", "graph_bg", "graph_edge", "badges", "graph_nodes",
+            "status_bar", "status_border", "tab_bg", "tab_active_bg", "input_bg", "separator",
         }
         dark_keys = set(THEMES["dark"])
         light_keys = set(THEMES["light"])
         self.assertTrue(required_keys.issubset(dark_keys))
         self.assertEqual(dark_keys, light_keys)
+        self.assertIn("sidebar_width", DIMENSIONS)
+        self.assertIn("header_height", DIMENSIONS)
+        self.assertEqual(set(SPACING), {"xs", "sm", "md", "lg", "xl"})
+        self.assertEqual(set(TYPE_SCALE), {"heading", "section", "body", "small", "micro"})
         for theme_name in ("dark", "light"):
             palette = THEMES[theme_name]
             self.assertEqual(set(palette["badges"]), {"success", "running", "warning", "danger", "neutral"})
@@ -30,6 +36,23 @@ class UIContractsTest(unittest.TestCase):
                 {"SUCCEEDED", "RUNNING", "VERIFYING", "PREPARING", "FAILED", "AWAITING_TOOL",
                  "AWAITING_APPROVAL", "CANCELLED", "NOT_EXECUTED", "QUEUED"},
             )
+
+    def test_primary_nav_and_route_registry_contracts(self):
+        primary_keys = [key for key, _, _ in PRIMARY_NAV]
+        self.assertEqual(primary_keys, ["workspace", "jobs", "agents", "projects", "settings"])
+        for key, str_key, glyph in PRIMARY_NAV:
+            self.assertTrue(glyph)
+            for locale in LOCALES:
+                self.assertNotEqual(t(str_key, locale), str_key)
+        expected_routes = {
+            "workspace", "home", "projects", "jobs", "agents", "terminals", "hosts",
+            "ssh", "mcp", "providers", "history", "settings", "dag", "submit",
+            "advanced_plan", "registry", "remote_runs",
+        }
+        self.assertTrue(expected_routes.issubset(set(ROUTE_SPECS)))
+        for route, (label_key, nav_target, _refresh) in ROUTE_SPECS.items():
+            self.assertTrue(label_key)
+            self.assertIn(nav_target, primary_keys, f"route {route} maps to invalid primary nav {nav_target}")
 
     def test_strings_locales_and_navigation_groups_are_complete(self):
         self.assertEqual(LOCALES, ("ko", "en"))

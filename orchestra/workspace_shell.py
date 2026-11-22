@@ -16,11 +16,31 @@ from .core import atomic_json, require
 from .execution_state import MERGE_EVIDENCE, TERMINAL, merge_candidate_ready
 from .observability import EVENT_LABELS, agent_rows
 from .supervisor import read_config
-from .ui import state_label
+from .ui import DIMENSIONS, NavRow, PRIMARY_NAV, STRINGS, StatusBadge, Tooltip, state_label, t
 from .workspace import format_commands, read_workspace, scan_clis
 
 
 INTERACTIVE_CLIS = ("OpenCode", "Codex", "Gemini CLI", "Antigravity", "Claude Code")
+
+ROUTE_SPECS = {
+    "workspace": ("nav.workspace", "workspace", None),
+    "jobs": ("nav.jobs", "jobs", "refresh_jobs"),
+    "agents": ("nav.agents", "agents", "refresh_agents"),
+    "projects": ("nav.projects", "projects", "refresh_projects"),
+    "settings": ("nav.settings", "settings", "refresh_settings"),
+    "providers": ("nav.providers", "settings", "refresh_providers"),
+    "ssh": ("nav.ssh", "settings", "refresh_ssh"),
+    "hosts": ("nav.hosts", "settings", "refresh_hosts"),
+    "mcp": ("nav.mcp", "settings", None),
+    "history": ("nav.history", "jobs", "refresh_history"),
+    "home": ("nav.home", "workspace", "refresh_home"),
+    "submit": ("submit.title", "jobs", "_wizard_sync_projects"),
+    "dag": ("DAG", "jobs", "refresh_graph"),
+    "remote_runs": ("원격 작업", "jobs", "refresh_remote"),
+    "advanced_plan": ("고급 JSON 편집", "jobs", None),
+    "registry": ("고급 레지스트리", "settings", "_ensure_registry_loaded"),
+    "terminals": ("nav.terminals", "workspace", None),
+}
 
 
 def same_repository(left, right):
@@ -40,7 +60,45 @@ def read_layout(path):
 
 
 class IntegratedWorkspace:
-    def workspace_page(self):
+    def _route_tab_title(self, key: str) -> str:
+        spec = ROUTE_SPECS.get(key)
+        label_key = spec[0] if spec else key
+        if label_key in STRINGS.get("ko", {}):
+            return t(label_key, self.locale)[:25]
+        return self.w(label_key)[:25]
+
+    def _update_nav_highlight(self, view_key: str) -> None:
+        nav_target = ROUTE_SPECS.get(view_key, (None, view_key, None))[1]
+        for name, row in getattr(self, "nav_rows", {}).items():
+            if isinstance(row, NavRow):
+                row.set_active(name == nav_target)
+
+    def _ensure_registry_loaded(self) -> None:
+        if hasattr(self, "registry") and not self.registry.get("1.0", "end-1c").strip():
+            self.reload_registry()
+
+    def _run_route_refresh(self, key: str) -> None:
+        spec = ROUTE_SPECS.get(key)
+        method_name = spec[2] if spec else None
+        if method_name and hasattr(self, method_name):
+            self.action(getattr(self, method_name))
+
+    def _fit_header(self, event=None) -> None:
+        if not hasattr(self, "header_left") or not hasattr(self, "header_right"):
+            return
+        width = event.width if event else self.header_bar.winfo_width()
+        if width < 100:
+            return
+        required = self.header_left.winfo_reqwidth() + self.header_right.winfo_reqwidth() + 12
+        info = self.header_right.grid_info()
+        row = int(info.get("row", 0)) if info else 0
+        if width < required and row == 0:
+            self.header_right.grid_configure(row=1, column=0, sticky="w")
+        elif width >= required and row != 0:
+            self.header_right.grid_configure(row=0, column=1, sticky="e")
+
+    def build_unified_shell(self):
+        p = self.palette
         self.workspace_layout_path = self.root / "ui-workspace.json"
         self.workspace_prefs = read_layout(self.workspace_layout_path)
         self.workspace_layout_writable = bool(self.workspace_prefs) or not self.workspace_layout_path.exists()
@@ -51,6 +109,8 @@ class IntegratedWorkspace:
         self.workspace_palette = None
         self.workspace_save_timer = None
         self.workspace_restore_done = False
+        self.workspace_focus_panels = None
+        self.route_tab_frames = {}
         self.workspace_context_fraction = .71
         saved = self.workspace_prefs.get("center_fraction")
         if type(saved) in (float, int) and .42 <= saved <= .83:
@@ -58,40 +118,219 @@ class IntegratedWorkspace:
         self.workspace_set_sash = True
         self.workspace_sash_width = None
 
-        page = ttk.Frame(self.host)
-        page.columnconfigure(0, weight=1)
-        page.rowconfigure(1, weight=1)
-        bar = ttk.Frame(page)
-        bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        bar.columnconfigure(0, weight=1)
-        self.workspace_actions = ttk.Frame(bar)
-        self.workspace_actions.grid(row=0, column=0, sticky="w")
-        self.workspace_view_actions = ttk.Frame(bar)
-        self.workspace_view_actions.grid(row=0, column=1, sticky="e")
-        self.button(self.workspace_actions, self.w("새 작업"), self.workspace_new_task, True)
-        self.workspace_terminal_button = self.button(self.workspace_actions, self.w("터미널 ▾"), self.workspace_terminal_menu)
-        self.workspace_layout_button = self.button(self.workspace_view_actions, self.w("보기 ▾"), self.workspace_layout_menu)
-        self.workspace_focus_button = self.button(self.workspace_view_actions, self.w("집중"), self.workspace_toggle_focus, subtle=True)
-        self.workspace_focus_panels = None
-        bar.bind("<Configure>", self.workspace_fit_toolbar)
+        self.window.columnconfigure(0, weight=0)
+        self.window.columnconfigure(1, weight=1)
+        self.window.rowconfigure(0, weight=0)
+        self.window.rowconfigure(1, weight=1)
+        self.window.rowconfigure(2, weight=0)
+
+        # Row 0: ONE Global Header
+        self.header_bar = tk.Frame(
+            self.window, bg=p["header"], height=DIMENSIONS["header_height"],
+            highlightthickness=1, highlightbackground=p["border"], bd=0,
+        )
+        self.header_bar.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self.header_bar.columnconfigure(0, weight=1)
+        self.header_bar.rowconfigure(0, minsize=DIMENSIONS["header_height"])
+
+        self.header_left = tk.Frame(self.header_bar, bg=p["header"], padx=8, pady=5)
+        self.header_left.grid(row=0, column=0, sticky="w")
+        self.workspace_actions = ttk.Frame(self.header_left, style="Header.TFrame")
+        self.workspace_actions.pack(side="left")
+
+        self.sidebar_toggle_btn = ttk.Button(
+            self.workspace_actions, text="≡", style="Icon.TButton", width=2,
+            command=self.workspace_toggle_sidebar,
+        )
+        self.sidebar_toggle_btn.pack(side="left", padx=(0, 6))
+        self.workspace_tooltip(self.sidebar_toggle_btn, lambda: self.w("사이드바 접기 / 열기"))
+
+        self.sidebar_project = tk.StringVar(self.window, t("header.project_unselected", self.locale))
+        self.sidebar_picker = ttk.Combobox(
+            self.workspace_actions, textvariable=self.sidebar_project, state="readonly", width=14,
+        )
+        self.sidebar_picker.pack(side="left", padx=(0, 6))
+        self.sidebar_picker.bind("<<ComboboxSelected>>", self.pick_sidebar)
+
+        self.header_env_badge = StatusBadge(
+            self.workspace_actions, p, text=self.host_name(None), tone="neutral", ui_font=self.ui_font,
+        )
+        self.header_env_badge.pack(side="left", padx=(0, 6))
+
+        self.header_new_task = ttk.Button(
+            self.workspace_actions, text=self.w("새 작업"), style="Primary.TButton",
+            command=self.workspace_new_task,
+        )
+        self.header_new_task.pack(side="left", padx=(0, 5))
+
+        self.workspace_terminal_button = ttk.Button(
+            self.workspace_actions, text=self.w("터미널 ▾"), style="Compact.TButton",
+            command=self.workspace_terminal_menu,
+        )
+        self.workspace_terminal_button.pack(side="left", padx=(0, 5))
+
         self.workspace_models = tk.StringVar(self.window)
-        self.workspace_model_picker = ttk.Combobox(self.workspace_actions, textvariable=self.workspace_models, state="readonly", width=27)
-        self.workspace_model_picker.pack(side="left", padx=(4, 6))
+        self.workspace_model_picker = ttk.Combobox(
+            self.workspace_actions, textvariable=self.workspace_models, state="readonly", width=18,
+        )
+        self.workspace_model_picker.pack(side="left", padx=(0, 4))
         self.workspace_model_picker.bind("<<ComboboxSelected>>", self.workspace_choose_model)
-        self.workspace_tooltip(self.workspace_model_picker, lambda: self.w("새 작업의 기본 모델입니다.") + "\n" + self.workspace_models.get())
-        self.workspace_tooltip(self.workspace_focus_button, lambda: self.w(
-            "숨기기 전의 패널 배치로 돌아갑니다." if self.workspace_focus_panels is not None
-            else "옆 패널을 접어 터미널에 더 넓은 공간을 줍니다."))
-        self.workspace_panes = ttk.Panedwindow(page, orient="horizontal")
-        self.workspace_panes.grid(row=1, column=0, sticky="nsew")
+        self.workspace_tooltip(
+            self.workspace_model_picker,
+            lambda: self.w("새 작업의 기본 모델입니다.") + "\n" + self.workspace_models.get(),
+        )
+
+        self.header_right = tk.Frame(self.header_bar, bg=p["header"], padx=8, pady=5)
+        self.header_right.grid(row=0, column=1, sticky="e")
+        self.workspace_view_actions = ttk.Frame(self.header_right, style="Header.TFrame")
+        self.workspace_view_actions.pack(side="right")
+
+        self.header_supervisor_badge = StatusBadge(
+            self.workspace_view_actions, p, text="● Supervisor", tone="warning", ui_font=self.ui_font,
+        )
+        self.header_supervisor_badge.pack(side="left", padx=(0, 5))
+        self.workspace_tooltip(self.header_supervisor_badge, lambda: self.status.cget("text") if hasattr(self, "status") else "Supervisor")
+
+        self.header_notice_badge = StatusBadge(
+            self.workspace_view_actions, p, text="0", tone="neutral", ui_font=self.ui_font,
+        )
+        self.header_notice_badge.pack(side="left", padx=(0, 6))
+        self.header_notice_badge.configure(cursor="hand2")
+        self.header_notice_badge.bind("<Button-1>", lambda _e: self.show("jobs"))
+
+        self.workspace_layout_button = ttk.Button(
+            self.workspace_view_actions, text=self.w("보기 ▾"), style="Compact.TButton",
+            command=self.workspace_layout_menu,
+        )
+        self.workspace_layout_button.pack(side="left", padx=(0, 4))
+
+        self.workspace_focus_button = ttk.Button(
+            self.workspace_view_actions, text=self.w("집중"), style="Compact.TButton",
+            command=self.workspace_toggle_focus,
+        )
+        self.workspace_focus_button.pack(side="left", padx=(0, 4))
+        self.workspace_tooltip(
+            self.workspace_focus_button,
+            lambda: self.w(
+                "숨기기 전의 패널 배치로 돌아갑니다." if self.workspace_focus_panels is not None
+                else "옆 패널을 접어 터미널에 더 넓은 공간을 줍니다."
+            ),
+        )
+
+        theme_label = t("header.theme_light", self.locale) if self.theme_name == "dark" else t("header.theme_dark", self.locale)
+        self.theme_btn = ttk.Button(
+            self.workspace_view_actions, text=theme_label, style="Compact.TButton",
+            command=self.toggle_theme,
+        )
+        self.theme_btn.pack(side="left")
+        self.header_bar.bind("<Configure>", self._fit_header)
+
+        # Row 1, Col 0: ONE Unified Orca Sidebar
+        self.nav_frame = tk.Frame(
+            self.window, bg=p["sidebar"], width=DIMENSIONS["sidebar_width"],
+            highlightthickness=1, highlightbackground=p["sidebar_border"], bd=0,
+        )
+        self.nav_frame.grid(row=1, column=0, sticky="nsew")
+        self.nav_frame.grid_propagate(False)
+        self.nav_frame.columnconfigure(0, weight=1)
+        self.nav_frame.rowconfigure(4, weight=1)
+        self.workspace_sidebar = self.nav_frame
+
+        self.brand_box = tk.Frame(self.nav_frame, bg=p["sidebar"], padx=12, pady=8)
+        self.brand_box.grid(row=0, column=0, sticky="ew")
+        self.brand_title = tk.Label(
+            self.brand_box, text=t("app.brand", self.locale), anchor="w", justify="left",
+            bg=p["sidebar"], fg=p["text"], font=(self.ui_font, 10, "bold"),
+        )
+        self.brand_title.pack(fill="x")
+
+        search_wrap = ttk.Frame(self.nav_frame, style="Sidebar.TFrame", padding=(10, 0, 10, 6))
+        search_wrap.grid(row=1, column=0, sticky="ew")
+        search_wrap.columnconfigure(0, weight=1)
+        self.workspace_search = tk.StringVar(self.window)
+        self.workspace_search_field = ttk.Entry(search_wrap, textvariable=self.workspace_search)
+        self.workspace_search_field.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.workspace_search.trace_add("write", lambda *_: self.refresh_workspace_sidebar())
+        self.workspace_tooltip(self.workspace_search_field, lambda: self.w("프로젝트·세션 검색"))
+        cmd_btn = ttk.Button(search_wrap, text=self.w("메뉴"), style="Compact.TButton", command=self.workspace_command_palette)
+        cmd_btn.grid(row=0, column=1)
+        self.workspace_tooltip(cmd_btn, lambda: t("nav.search_placeholder", self.locale))
+
+        self.primary_nav_box = self.track_themed(tk.Frame(self.nav_frame, bg=p["sidebar"], pady=2), bg_key="sidebar")
+        self.primary_nav_box.grid(row=2, column=0, sticky="ew")
+        self.nav_rows = {}
+        self.nav_buttons = {}
+        for key, str_key, glyph in PRIMARY_NAV:
+            row = NavRow(
+                self.primary_nav_box, p, t(str_key, self.locale), icon=glyph,
+                ui_font=self.ui_font, command=lambda name=key: self.show(name),
+            )
+            row.pack(fill="x", padx=6, pady=1)
+            self.nav_rows[key] = row
+            self.nav_buttons[key] = row
+
+        heading_wrap = ttk.Frame(self.nav_frame, style="Sidebar.TFrame", padding=(10, 6, 8, 2))
+        heading_wrap.grid(row=3, column=0, sticky="ew")
+        heading_wrap.columnconfigure(0, weight=1)
+        ttk.Separator(heading_wrap).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        ttk.Label(heading_wrap, text=self.w("프로젝트 및 세션"), style="SidebarSection.TLabel").grid(row=1, column=0, sticky="w")
+        ttk.Button(heading_wrap, text=self.w("+ 추가"), style="Compact.TButton", command=self.workspace_add_menu).grid(row=1, column=1, sticky="e")
+
+        tree_wrap = ttk.Frame(self.nav_frame, style="Sidebar.TFrame", padding=(6, 2, 4, 4))
+        tree_wrap.grid(row=4, column=0, sticky="nsew")
+        tree_wrap.columnconfigure(0, weight=1)
+        tree_wrap.rowconfigure(0, weight=1)
+        tree = ttk.Treeview(tree_wrap, style="Sidebar.Treeview", show="tree", selectmode="browse", height=12)
+        tree.column("#0", width=205, minwidth=90, stretch=True)
+        tree.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(tree_wrap, orient="vertical", command=tree.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        tree.configure(yscrollcommand=scroll.set)
+        tree.bind("<Double-1>", self.workspace_sidebar_open)
+        tree.bind("<Return>", self.workspace_sidebar_open)
+        tree.bind("<Button-3>", self.workspace_sidebar_menu)
+        tree.bind("<ButtonRelease-1>", self.workspace_sidebar_click)
+        self.workspace_tree = tree
+
+        self.sidebar_utility = self.track_themed(
+            tk.Frame(self.nav_frame, bg=p["sidebar"], padx=8, pady=6, highlightthickness=1, highlightbackground=p["sidebar_border"], bd=0),
+            bg_key="sidebar", border_key="sidebar_border",
+        )
+        self.sidebar_utility.grid(row=5, column=0, sticky="ew")
+        self.sidebar_utility.columnconfigure(0, weight=1, uniform="sidebar_util")
+        self.sidebar_utility.columnconfigure(1, weight=1, uniform="sidebar_util")
+        for idx, (label_text, route) in enumerate((
+            (self.w("Provider"), "providers"),
+            (self.w("SSH"), "ssh"),
+            (self.w("MCP"), "mcp"),
+            (self.w("기록"), "history"),
+        )):
+            ttk.Button(
+                self.sidebar_utility, text=label_text, style="Compact.TButton",
+                command=lambda r=route: self.show(r),
+            ).grid(row=idx // 2, column=idx % 2, sticky="ew", padx=2, pady=2)
+
+        # Row 1, Col 1: ONE Unified Workspace Content + Context Panel
+        self.main_shell = ttk.Frame(self.window)
+        self.main_shell.grid(row=1, column=1, sticky="nsew")
+        self.main_shell.columnconfigure(0, weight=1)
+        self.main_shell.rowconfigure(0, weight=1)
+
+        self.workspace_panes = ttk.Panedwindow(self.main_shell, orient="horizontal")
+        self.workspace_panes.grid(row=0, column=0, sticky="nsew")
+
         center = ttk.Frame(self.workspace_panes)
         center.rowconfigure(0, weight=1)
         center.columnconfigure(0, weight=1)
-        self.workspace_book = ttk.Notebook(center)
+        self.workspace_book = ttk.Notebook(center, style="Workspace.TNotebook")
         self.workspace_book.grid(row=0, column=0, sticky="nsew")
         self.workspace_panes.add(center, weight=4)
+
+        self.host = self.workspace_book
         self.init_workspace_sessions(self.workspace_book)
         self.workspace_book.bind("<<NotebookTabChanged>>", self.workspace_tab_changed, add="+")
+        self.workspace_book.bind("<Button-2>", self._workspace_tab_middle_click, add="+")
+        self.workspace_book.bind("<Button-3>", self._workspace_tab_context_menu, add="+")
 
         self.workspace_context = self.build_workspace_context(self.workspace_panes)
         self.workspace_panes.add(self.workspace_context, weight=1)
@@ -99,69 +338,99 @@ class IntegratedWorkspace:
         self.workspace_panes.bind("<ButtonRelease-1>", self.workspace_capture_sash, add="+")
         self.build_workspace_observation()
         self.workspace_context.bind("<<NotebookTabChanged>>", self.workspace_context_tab_changed, add="+")
-        ttk.Separator(page).grid(row=2, column=0, sticky="ew", pady=(6, 0))
-        footer = ttk.Frame(page)
-        footer.grid(row=3, column=0, sticky="ew")
-        self.workspace_status = ttk.Label(footer, style="Muted.TLabel", text=self.w("프로젝트를 선택하세요."), padding=(4, 3))
-        self.workspace_runtime_status = ttk.Label(footer, style="Muted.TLabel", padding=(4, 3))
-        for widget in (self.workspace_status, self.workspace_runtime_status):
-            widget.pack(anchor="w")
-            footer.bind("<Configure>", lambda event, label=widget: label.configure(
-                wraplength=max(120, event.width - 12)), add="+")
 
-        self.workspace_overview = ttk.Frame(self.workspace_book, padding=18)
-        self.workspace_overview.columnconfigure(0, weight=1)
-        self.workspace_overview.rowconfigure(3, weight=1)
+        # Row 2, Col 0..1: ONE Unified Status Bar
+        self.status_bar = tk.Frame(
+            self.window, bg=p["status_bar"], highlightthickness=1, highlightbackground=p["status_border"], bd=0,
+        )
+        self.status_bar.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.status_bar.columnconfigure(0, weight=1)
+        self.workspace_status = ttk.Label(
+            self.status_bar, style="StatusBar.TLabel", text=self.w("프로젝트를 선택하세요."), padding=(10, 2),
+        )
+        self.workspace_status.grid(row=0, column=0, sticky="ew")
+        self.workspace_runtime_status = ttk.Label(
+            self.status_bar, style="StatusBar.TLabel", padding=(10, 2),
+        )
+        self.workspace_runtime_status.grid(row=1, column=0, sticky="ew")
+        self.header_workers_badge = StatusBadge(
+            self.status_bar, p, text=self.w("로컬 Worker"), tone="neutral", ui_font=self.ui_font,
+        )
+        self.header_workers_badge.grid(row=0, column=1, rowspan=2, sticky="e", padx=(6, 10), pady=3)
+        self.status = ttk.Label(self.status_bar, text=t("header.supervisor_connecting", self.locale), style="StatusBar.TLabel")
+        for widget in (self.workspace_status, self.workspace_runtime_status):
+            self.status_bar.bind(
+                "<Configure>",
+                lambda event, label=widget: label.configure(wraplength=max(200, event.width - 140)),
+                add="+",
+            )
+
+        # Build Overview tab + All unified workspace route pages
+        self.workspace_overview = self._build_workspace_overview()
         self.workspace_book.add(self.workspace_overview, text=self.w("프로젝트 개요"))
-        self.workspace_title = ttk.Label(self.workspace_overview, text=self.w("프로젝트 선택"), style="Heading.TLabel")
+        self.pages = {"workspace": self.workspace_overview}
+        for key, _, factory in self.navigation():
+            if key == "workspace":
+                continue
+            self.pages[key] = factory()
+        self.route_tab_frames = {str(frame): key for key, frame in self.pages.items() if key != "workspace"}
+        return self.workspace_overview
+
+    def _build_workspace_overview(self):
+        overview = ttk.Frame(self.workspace_book, padding=(18, 14))
+        overview.columnconfigure(0, weight=1)
+        overview.rowconfigure(2, weight=1)
+        self.workspace_title = ttk.Label(overview, text=self.w("프로젝트 선택"), style="PageHeading.TLabel")
         self.workspace_title.grid(row=0, column=0, sticky="w")
-        project_actions = ttk.Frame(self.workspace_overview)
-        project_actions.grid(row=1, column=0, sticky="ew", pady=(10, 5))
+        project_actions = ttk.Frame(overview)
+        project_actions.grid(row=1, column=0, sticky="ew", pady=(10, 6))
         self.workspace_setup_button = self.button(project_actions, self.w("작업 공간 설정"), self.open_workspace_setup, True)
         self.workspace_add_repo = self.button(project_actions, self.w("저장소 추가"), self.add_local_project)
-        self.workspace_project_cli = self.button(project_actions, self.w("터미널 열기 ▾"),
-                                                 lambda: self.workspace_terminal_menu(self.workspace_project_cli), True)
-        self.workspace_overview_text = self.text(self.workspace_overview, 2, height=11)
+        self.workspace_project_cli = self.button(
+            project_actions, self.w("터미널 열기 ▾"),
+            lambda: self.workspace_terminal_menu(self.workspace_project_cli), True,
+        )
+        self.workspace_overview_text = self.text(overview, 2, height=11)
         self.write(self.workspace_overview_text, self.w("왼쪽에서 프로젝트를 열거나 Git 저장소를 등록하세요."), True)
-        return page
+        return overview
 
-    def workspace_fit_toolbar(self, event):
-        same_row = self.workspace_actions.winfo_reqwidth() + self.workspace_view_actions.winfo_reqwidth() + 10 <= event.width
-        self.workspace_view_actions.grid_configure(row=0 if same_row else 1, column=1 if same_row else 0,
-                                                   sticky="e" if same_row else "w")
+    def workspace_page(self):
+        if hasattr(self, "workspace_overview"):
+            return self.workspace_overview
+        return self.build_unified_shell()
+
+    def _workspace_tab_middle_click(self, event):
+        try:
+            index = self.workspace_book.index(f"@{event.x},{event.y}")
+        except tk.TclError:
+            return
+        tab = self.workspace_book.tabs()[index]
+        if tab != str(self.workspace_overview):
+            self.close_workspace_tab(tab)
+
+    def _workspace_tab_context_menu(self, event):
+        try:
+            index = self.workspace_book.index(f"@{event.x},{event.y}")
+        except tk.TclError:
+            return
+        tab = self.workspace_book.tabs()[index]
+        menu = tk.Menu(self.window, tearoff=False)
+        if tab != str(self.workspace_overview):
+            menu.add_command(label=self.w("현재 탭 닫기"), command=lambda t_id=tab: self.close_workspace_tab(t_id))
+        menu.add_command(label=self.w("다른 탭 닫기"), command=lambda t_id=tab: self._close_other_workspace_tabs(t_id))
+        menu.add_separator()
+        menu.add_command(label=self.w("탭 왼쪽으로 이동"), command=lambda: (self.workspace_book.select(tab), self.workspace_move_tab(-1)))
+        menu.add_command(label=self.w("탭 오른쪽으로 이동"), command=lambda: (self.workspace_book.select(tab), self.workspace_move_tab(1)))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _close_other_workspace_tabs(self, keep_tab):
+        for tab in list(self.workspace_book.tabs()):
+            if tab in (keep_tab, str(self.workspace_overview)):
+                continue
+            self.close_workspace_tab(tab)
 
     def workspace_tooltip(self, widget, message):
-        pending = tip = None
-
-        def show():
-            nonlocal pending, tip
-            pending = None
-            tip = tk.Toplevel(widget)
-            tip.wm_overrideredirect(True)
-            ttk.Label(tip, text=message(), padding=6, wraplength=320,
-                      style="Elevated.TLabel").pack()
-            tip.update_idletasks()
-            x = min(widget.winfo_rootx(), widget.winfo_screenwidth() - tip.winfo_reqwidth())
-            tip.geometry(f"+{max(0, x)}+{widget.winfo_rooty() + widget.winfo_height() + 3}")
-
-        def hover(_):
-            nonlocal pending
-            if pending is None and tip is None:
-                pending = widget.after(550, show)
-
-        def dismiss(_):
-            nonlocal pending, tip
-            if pending is not None:
-                widget.after_cancel(pending)
-                pending = None
-            if tip is not None:
-                if tip.winfo_exists():
-                    tip.destroy()
-                tip = None
-
-        widget.bind("<Enter>", hover, add="+")
-        for event in ("<Leave>", "<ButtonPress>", "<Destroy>"):
-            widget.bind(event, dismiss, add="+")
+        Tooltip(widget, message)
 
     def workspace_toggle_focus(self):
         panels = self.workspace_focus_panels
@@ -185,39 +454,8 @@ class IntegratedWorkspace:
                 self.workspace_save_later()
 
     def build_workspace_sidebar(self):
-        box = ttk.Frame(self.nav_frame, padding=(8, 3))
-        box.columnconfigure(0, weight=1)
-        box.rowconfigure(3, weight=1)
-        self.workspace_sidebar = box
-        self.workspace_search = tk.StringVar(self.window)
-        search_box = ttk.Frame(box)
-        search_box.grid(row=0, column=0, sticky="ew")
-        ttk.Label(search_box, text=self.w("프로젝트·세션 검색"), style="Muted.TLabel").pack(anchor="w")
-        search = ttk.Entry(search_box, textvariable=self.workspace_search)
-        search.pack(fill="x", pady=(2, 0))
-        self.workspace_search_field = search
-        self.workspace_search.trace_add("write", lambda *_: self.refresh_workspace_sidebar())
-        top = ttk.Frame(box)
-        top.grid(row=1, column=0, sticky="ew", pady=4)
-        for title, command in ((self.w("작업"), lambda: self.show("jobs")), ("Agent", lambda: self.show("agents")),
-                               (self.w("메뉴"), self.workspace_command_palette)):
-            ttk.Button(top, text=title, style="Subtle.TButton", width=5, padding=3, command=command).pack(
-                side="left", expand=True, fill="x", padx=(0, 3))
-        heading = ttk.Frame(box)
-        heading.grid(row=2, column=0, sticky="ew")
-        ttk.Label(heading, text=self.w("프로젝트 및 세션"), style="Section.TLabel").pack(side="left")
-        self.button(heading, self.w("+ 추가"), self.workspace_add_menu, side="right", subtle=True)
-        tree = ttk.Treeview(box, show="tree", selectmode="browse", height=12)
-        tree.column("#0", width=215, minwidth=100, stretch=True)
-        tree.grid(row=3, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(box, orient="vertical", command=tree.yview)
-        scroll.grid(row=3, column=1, sticky="ns")
-        tree.configure(yscrollcommand=scroll.set)
-        tree.bind("<Double-1>", self.workspace_sidebar_open)
-        tree.bind("<Return>", self.workspace_sidebar_open)
-        tree.bind("<Button-3>", self.workspace_sidebar_menu)
-        tree.bind("<ButtonRelease-1>", self.workspace_sidebar_click)
-        self.workspace_tree = tree
+        # Sidebar is built once inside build_unified_shell(); kept for API compatibility.
+        return getattr(self, "nav_frame", None)
 
     def restore_workspace(self):
         if self.workspace_restore_done:
@@ -239,6 +477,13 @@ class IntegratedWorkspace:
                     self.open_workspace_job(key, activate=False)
                 if key in self.workspace_tabs:
                     restored["job/" + key] = str(self.workspace_tabs[key]["frame"])
+        saved_routes = self.workspace_prefs.get("route_tabs")
+        for key in saved_routes[:16] if isinstance(saved_routes, list) else []:
+            if isinstance(key, str) and key in self.pages and key != "workspace":
+                frame = self.pages[key]
+                if str(frame) not in self.workspace_book.tabs():
+                    self.workspace_book.add(frame, text=self._route_tab_title(key))
+                restored["route/" + key] = str(frame)
         restored["overview"] = str(self.workspace_overview)
         order = self.workspace_prefs.get("tab_order")
         if isinstance(order, list):
@@ -247,35 +492,28 @@ class IntegratedWorkspace:
                 self.workspace_book.insert(index, tab)
         if self.workspace_prefs.get("context_hidden") is True:
             self.workspace_panes.forget(self.workspace_context)
+        self.workspace_show(True)
         active = self.workspace_prefs.get("active_tab")
         tab = restored.get(active) if isinstance(active, str) else None
-        self.workspace_book.select(tab if tab and self.workspace_book.tab(tab, "state") != "hidden" else self.workspace_overview)
+        target = tab if tab and self.workspace_book.tab(tab, "state") != "hidden" else self.workspace_overview
+        self.workspace_book.select(target)
+        route_key = self.route_tab_frames.get(str(target))
+        if route_key:
+            self.view = route_key
+            self._update_nav_highlight(route_key)
+            self._run_route_refresh(route_key)
+        else:
+            self.view = "workspace"
+            self._update_nav_highlight("workspace")
         self.refresh_workspace()
 
-    def workspace_show(self, active):
-        if not hasattr(self, "workspace_sidebar"):
+    def workspace_show(self, _active=True):
+        if not hasattr(self, "nav_frame"):
             return
-        if active:
-            self.nav_frame.configure(width=230)
-            self.header_new_task.pack_forget()
-            self.header_workers_badge.pack_forget()
-            self.header_notice_badge.pack_forget()
-            self.nav_scroll_canvas.grid_remove()
-            self.workspace_sidebar.grid(row=1, column=0, sticky="nsew")
-            if self.workspace_prefs.get("sidebar_hidden") is True:
-                self.nav_frame.grid_remove()
-            else:
-                self.nav_frame.grid()
-            self.refresh_workspace()
+        if self.workspace_prefs.get("sidebar_hidden") is True:
+            self.nav_frame.grid_remove()
         else:
-            self.nav_frame.configure(width=252)
-            if not self.header_workers_badge.winfo_manager():
-                self.header_workers_badge.pack(side="left", before=self.theme_btn, padx=(0, 6))
-                self.header_notice_badge.pack(side="left", before=self.theme_btn, padx=(0, 8))
-                self.header_new_task.pack(side="left")
-            self.workspace_sidebar.grid_remove()
             self.nav_frame.grid()
-            self.nav_scroll_canvas.grid()
 
     def workspace_restore_sash(self, _=None):
         width = self.workspace_panes.winfo_width()
@@ -336,13 +574,21 @@ class IntegratedWorkspace:
             return
         terminals = list(self.terminal_layout_entries())[:40]
         jobs = list(self.workspace_tabs)[:16]
+        routes = [key for tab in self.workspace_book.tabs() if (key := self.route_tab_frames.get(tab))][:16]
         references = {key: f"terminal/{index}" for index, (key, _) in enumerate(terminals)}
         references.update({str(self.workspace_tabs[key]["frame"]): "job/" + key for key in jobs})
+        references.update({str(self.pages[key]): "route/" + key for key in routes})
         references[str(self.workspace_overview)] = "overview"
-        self.workspace_prefs.update(version=1, project=self.project_id, center_fraction=self.workspace_context_fraction,
-                                    terminals=[descriptor for _, descriptor in terminals], job_tabs=jobs,
-                                    tab_order=[references[tab] for tab in self.workspace_book.tabs() if tab in references],
-                                    active_tab=references.get(self.workspace_book.select()))
+        self.workspace_prefs.update(
+            version=1,
+            project=self.project_id,
+            center_fraction=self.workspace_context_fraction,
+            terminals=[descriptor for _, descriptor in terminals],
+            job_tabs=jobs,
+            route_tabs=routes,
+            tab_order=[references[tab] for tab in self.workspace_book.tabs() if tab in references],
+            active_tab=references.get(self.workspace_book.select()),
+        )
         saved = dict(self.workspace_prefs)
         if self.workspace_focus_panels is not None:
             saved["sidebar_hidden"], saved["context_hidden"] = self.workspace_focus_panels
@@ -350,35 +596,46 @@ class IntegratedWorkspace:
             atomic_json(self.workspace_layout_path, saved)
         except OSError as error:
             self.status.configure(text=self.w("레이아웃 저장 실패 · {0}", error.strerror or type(error).__name__))
+            self.workspace_update_runtime_footer()
 
     def workspace_session_changed(self):
         self.workspace_save_later()
-        if getattr(self, "view", None) == "workspace" and hasattr(self, "workspace_tree"):
+        if hasattr(self, "workspace_tree"):
             self.workspace_update_runtime_footer()
             self.refresh_workspace_sidebar()
 
     def workspace_tab_changed(self, _=None):
-        if hasattr(self, "workspace_tree") and self.view == "workspace":
-            tab = self.workspace_book.select()
-            session = self.terminal_tabs.get(tab)
-            if session and session.views:
-                session.views[session.active_panel].surface.focus_set()
-            project = session.recipes[0].project if session else next(
-                (item.get("project") for item in self.workspace_tabs.values() if str(item["frame"]) == tab), None)
-            if project and project != self.project_id and project in self.project_rows():
-                self.project_id = project
-                self.refresh_sidebar()
-                self.workspace_save_later()
-            self.refresh_workspace()
+        if not hasattr(self, "workspace_tree") or not self.workspace_restore_done:
+            return
+        tab = self.workspace_book.select()
+        route_key = self.route_tab_frames.get(tab)
+        if route_key:
+            self.view = route_key
+            self._update_nav_highlight(route_key)
+            self._run_route_refresh(route_key)
+            self.workspace_update_runtime_footer()
+            self.workspace_save_later()
+            return
+        self.view = "workspace"
+        self._update_nav_highlight("workspace")
+        session = self.terminal_tabs.get(tab)
+        if session and session.views:
+            session.views[session.active_panel].surface.focus_set()
+        project = session.recipes[0].project if session else next(
+            (item.get("project") for item in self.workspace_tabs.values() if str(item["frame"]) == tab), None,
+        )
+        if project and project != self.project_id and project in self.project_rows():
+            self.project_id = project
+            self.refresh_sidebar()
+        self.refresh_workspace()
+        self.workspace_save_later()
 
     def select_workspace_project(self, key, *, overview=True):
         require(key in self.project_rows(), self.w("등록한 프로젝트를 선택하세요."))
         self.project_id = key
         recent = self.workspace_prefs.get("recent_projects", [])
         self.workspace_prefs["recent_projects"] = [key, *[item for item in recent if item != key and isinstance(item, str)][:5]] if isinstance(recent, list) else [key]
-        self.show("workspace")
-        if overview:
-            self.workspace_book.select(self.workspace_overview)
+        self.show("workspace", keep_tab=not overview)
         self.refresh_sidebar()
         self.refresh_workspace()
         self.workspace_save_later()
@@ -451,7 +708,7 @@ class IntegratedWorkspace:
             preferred = self.workspace_selected_model(self.project_id)
             if preferred in self.available_terminal_models(name):
                 model = preferred
-        self.open_ai_terminal(name, project_id=self.project_id, model=model)
+        return self.open_ai_terminal(name, project_id=self.project_id, model=model)
 
     def workspace_terminal_menu(self, anchor=None):
         menu = tk.Menu(self.window, tearoff=False)
@@ -580,10 +837,10 @@ class IntegratedWorkspace:
         if tabs:
             self.workspace_book.select(tabs[(tabs.index(selected) + delta) % len(tabs)] if selected in tabs else tabs[0])
 
-    def close_workspace_tab(self):
-        tab = self.workspace_book.select()
+    def close_workspace_tab(self, tab=None):
+        tab = tab or self.workspace_book.select()
         if tab in self.terminals:
-            self.close_terminal_view()
+            self.close_terminal_view(tab)
             return
         for key, item in list(self.workspace_tabs.items()):
             if str(item["frame"]) == tab:
@@ -591,7 +848,10 @@ class IntegratedWorkspace:
                 self.workspace_book.forget(tab)
                 item["frame"].destroy()
                 self.workspace_save_later()
-                break
+                return
+        if tab in getattr(self, "route_tab_frames", {}):
+            self.workspace_book.forget(tab)
+            self.workspace_save_later()
 
     def workspace_command_palette(self):
         if self.workspace_palette and self.workspace_palette.winfo_exists():
@@ -651,7 +911,7 @@ class IntegratedWorkspace:
         self.workspace_search_field.focus_set()
 
     def workspace_find_file(self):
-        self.show("workspace")
+        self.show("workspace", keep_tab=True)
         if len(self.workspace_panes.panes()) == 1:
             self.workspace_toggle_context()
         self.focus_workspace_file_search()

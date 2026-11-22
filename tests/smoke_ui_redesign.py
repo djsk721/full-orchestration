@@ -274,16 +274,16 @@ def exercise(screenshots_dir: Path | None = None) -> None:
                 assert app.main_shell.winfo_width() > 600, f"main shell collapsed at {width}x{height}"
 
             # Light/dark toggle and ui_prefs.json persistence (without breaking registry.json)
-            assert app.theme_name == "dark"
+            assert app.theme_name == "light"
             app.toggle_theme()
             pump(window, 0.1)
-            assert app.theme_name == "light"
-            assert app.palette["name"] == "light"
+            assert app.theme_name == "dark"
+            assert app.palette["name"] == "dark"
             assert (data / "ui_prefs.json").exists()
             assert config_check(read_config(data)) is not None
             app.toggle_theme()
             pump(window, 0.1)
-            assert app.theme_name == "dark"
+            assert app.theme_name == "light"
 
             # 2. Register Project + Provider Profile
             runtime_kind = "llama.cpp" if "llama.cpp" in RUNTIME_KINDS else RUNTIME_KINDS[0]
@@ -328,12 +328,13 @@ def exercise(screenshots_dir: Path | None = None) -> None:
             assert forms, "Provider settings wizard did not open"
             form = forms[0]
             assert len(form.fields) == 10, f"expected 10 fields, got {set(form.fields)}"
-            assert not form.field_rows["endpoint"][0].winfo_ismapped(), "endpoint should be hidden in simple mode"
+            assert form.field_rows["endpoint"][0].winfo_ismapped(), "endpoint should be visible for runtime providers in simple mode"
+            assert not form.field_rows["auth_env"][0].winfo_ismapped(), "auth_env should be hidden in simple mode"
             adv_radios = find_radios(form, "고급 모드")
             assert adv_radios, "missing 고급 모드 radio"
             adv_radios[0].invoke()
             pump(window, 0.12)
-            assert form.field_rows["endpoint"][0].winfo_ismapped(), "endpoint should be visible in advanced mode"
+            assert form.field_rows["auth_env"][0].winfo_ismapped(), "auth_env should be visible in advanced mode"
             form.destroy()
             pump(window, 0.05)
 
